@@ -1,26 +1,24 @@
-[project]
+[tool.poetry]
 name = "files-to-prompt"
 version = "0.2.1"
 description = "Concatenate a directory full of files into a single prompt for use with LLMs"
-readme = "README.md"
-authors = [{name = "Simon Willison"}]
-license = {text = "Apache-2.0"}
-requires-python = ">=3.8"
-classifiers = [
-    "License :: OSI Approved :: Apache Software License"
-]
-dependencies = [
-    "click"
-]
+authors = ["Simon Willison <you@example.com>"]
 
-[project.urls]
-Homepage = "https://github.com/simonw/files-to-prompt"
-Changelog = "https://github.com/simonw/files-to-prompt/releases"
-Issues = "https://github.com/simonw/files-to-prompt/issues"
-CI = "https://github.com/simonw/files-to-prompt/actions"
+[tool.poetry.dependencies]
+python = ">=3.8"
+click = "^8.0.0"
+diskcache = "*"
+openai = "^1.7.1"
+platformdirs = "*"
 
-[project.entry-points.console_scripts]
+[tool.poetry.dev-dependencies]
+pytest = "^6.0.0"
+diskcache = "*"
+[tool.poetry.scripts]
 files-to-prompt = "files_to_prompt.cli:cli"
 
-[project.optional-dependencies]
-test = ["pytest"]
+[tool.pytest.ini_options]
+markers = [
+    "this: description of the this marker",
+    "llm: tests that call llm",
+]

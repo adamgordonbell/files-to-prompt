@@ -1,0 +1,584 @@
+./pyproject.toml
+---
+[tool.poetry]
+name = "files-to-prompt"
+version = "0.2.1"
+description = "Concatenate a directory full of files into a single prompt for use with LLMs"
+authors = ["Simon Willison <you@example.com>"]
+
+[tool.poetry.dependencies]
+python = ">=3.8"
+click = "^8.0.0"
+diskcache = "*"
+openai = "^1.7.1"
+platformdirs = "*"
+
+[tool.poetry.dev-dependencies]
+pytest = "^6.0.0"
+diskcache = "*"
+[tool.poetry.scripts]
+files-to-prompt = "files_to_prompt.cli:cli"
+
+[tool.pytest.ini_options]
+markers = [
+    "this: description of the this marker",
+    "llm: tests that call llm",
+]
+
+
+---
+./prompt.txt
+---
+./pyproject.toml
+---
+[tool.poetry]
+name = "files-to-prompt"
+version = "0.2.1"
+description = "Concatenate a directory full of files into a single prompt for use with LLMs"
+authors = ["Simon Willison <you@example.com>"]
+
+[tool.poetry.dependencies]
+python = ">=3.8"
+click = "^8.0.0"
+diskcache = "*"
+openai = "^1.7.1"
+platformdirs = "*"
+
+[tool.poetry.dev-dependencies]
+pytest = "^6.0.0"
+diskcache = "*"
+[tool.poetry.scripts]
+files-to-prompt = "files_to_prompt.cli:cli"
+
+[tool.pytest.ini_options]
+markers = [
+    "this: description of the this marker",
+    "llm: tests that call llm",
+]
+
+
+---
+
+
+---
+./files_to_prompt/__init__.py
+---
+
+
+---
+./files_to_prompt/cli.py
+---
+import os
+import click
+from fnmatch import fnmatch
+
+def should_ignore(path, gitignore_rules):
+    for rule in gitignore_rules:
+        if fnmatch(os.path.basename(path), rule):
+            return True
+        if os.path.isdir(path) and fnmatch(os.path.basename(path) + "/", rule):
+            return True
+    return False
+
+
+def read_gitignore(path):
+    gitignore_path = os.path.join(path, ".gitignore")
+    if os.path.isfile(gitignore_path):
+        with open(gitignore_path, "r") as f:
+            return [
+                line.strip() for line in f if line.strip() and not line.startswith("#")
+            ]
+    return []
+
+
+def process_path(
+    path, include_hidden, ignore_gitignore, gitignore_rules, ignore_patterns
+):
+    if os.path.isfile(path):
+        try:
+            with open(path, "r") as f:
+                file_contents = f.read()
+            click.echo(path)
+            click.echo("---")
+            click.echo(file_contents)
+            click.echo()
+            click.echo("---")
+        except UnicodeDecodeError:
+            warning_message = f"Warning: Skipping file {path} due to UnicodeDecodeError"
+            click.echo(click.style(warning_message, fg="red"), err=True)
+    elif os.path.isdir(path):
+        for root, dirs, files in os.walk(path):
+            if not include_hidden:
+                dirs[:] = [d for d in dirs if not d.startswith(".")]
+                files = [f for f in files if not f.startswith(".")]
+
+            if not ignore_gitignore:
+                gitignore_rules.extend(read_gitignore(root))
+                dirs[:] = [
+                    d
+                    for d in dirs
+                    if not should_ignore(os.path.join(root, d), gitignore_rules)
+                ]
+                files = [
+                    f
+                    for f in files
+                    if not should_ignore(os.path.join(root, f), gitignore_rules)
+                ]
+
+            if ignore_patterns:
+                files = [
+                    f
+                    for f in files
+                    if not any(fnmatch(f, pattern) for pattern in ignore_patterns)
+                ]
+
+            for file in files:
+                file_path = os.path.join(root, file)
+                try:
+                    with open(file_path, "r") as f:
+                        file_contents = f.read()
+
+                    click.echo(file_path)
+                    click.echo("---")
+                    click.echo(file_contents)
+                    click.echo()
+                    click.echo("---")
+                except UnicodeDecodeError:
+                    warning_message = (
+                        f"Warning: Skipping file {file_path} due to UnicodeDecodeError"
+                    )
+                    click.echo(click.style(warning_message, fg="red"), err=True)
+
+
+@click.command()
+@click.argument("paths", nargs=-1, type=click.Path(exists=True))
+@click.option(
+    "--include-hidden",
+    is_flag=True,
+    help="Include files and folders starting with .",
+)
+@click.option(
+    "--ignore-gitignore",
+    is_flag=True,
+    help="Ignore .gitignore files and include all files",
+)
+@click.option(
+    "ignore_patterns",
+    "--ignore",
+    multiple=True,
+    default=[],
+    help="List of patterns to ignore",
+)
+@click.version_option()
+def cli(paths, include_hidden, ignore_gitignore, ignore_patterns):
+    """
+    Takes one or more paths to files or directories and outputs every file,
+    recursively, each one preceded with its filename like this:
+
+    path/to/file.py
+    ----
+    Contents of file.py goes here
+
+    ---
+    path/to/file2.py
+    ---
+    ...
+    """
+    gitignore_rules = []
+    for path in paths:
+        if not os.path.exists(path):
+            raise click.BadArgumentUsage(f"Path does not exist: {path}")
+        if not ignore_gitignore:
+            gitignore_rules.extend(read_gitignore(os.path.dirname(path)))
+        process_path(
+            path, include_hidden, ignore_gitignore, gitignore_rules, ignore_patterns
+        )
+
+
+---
+./files_to_prompt/guidance.py
+---
+import hashlib
+import os
+import threading
+import types
+from typing import Dict, List, Optional
+
+import diskcache as dc
+import openai
+import platformdirs
+
+Message = Dict[str, str]
+
+# Create a thread-local object to store the current_role
+_thread_locals: threading.local = threading.local()
+
+def get_current_role() -> Optional[str]:
+    """Return the current role for the current thread."""
+    return getattr(_thread_locals, "current_role", None)
+
+def set_current_role(role: Optional[str]) -> None:
+    """Set the current role for the current thread."""
+    _thread_locals.current_role = role
+
+class Model:
+    def __init__(self, model: str):
+        self.model = model
+        self.client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.messages: List[Message] = []
+        self.response: Dict[str, str] = {}
+        cache_path = os.path.join(platformdirs.user_cache_dir("guidance"), "openai.tokens")
+        self.cache = dc.Cache(cache_path, size_limit=int(1e12), eviction_policy="none")
+
+    def __iadd__(self, message: str) -> 'Model':
+        current_role = get_current_role()
+        if current_role:
+            self.messages.append({"role": current_role, "content": message.strip()})
+        return self
+
+    def __add__(self, message: str) -> 'Model':
+        self.__iadd__(message)
+        return self
+
+    def _hash_prompt(self, prompt: str) -> str:
+        return hashlib.sha256(f"{self.model}{prompt}".encode()).hexdigest()
+
+    def gen(self, context: str, max_tokens: int = 300, temperature: float = 0.0) -> None:
+        prompt = "\n".join([f"{message['role']}: {message['content']}" for message in self.messages])
+        if temperature == 0:
+            cache_key = self._hash_prompt(prompt)
+            if cache_key in self.cache:
+                print("Cached")
+                cached_response = self.cache[cache_key]
+                self.messages.append({"role": "assistant", "content": cached_response})
+                self.response[context] = cached_response
+                return
+        print("Request...")
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=self.messages,  # type: ignore
+            max_tokens=max_tokens,
+            temperature=temperature
+        )
+        assistant_message = response.choices[0].message.content or ""
+        self.messages.append({"role": "assistant", "content": assistant_message})
+        self.response[context] = assistant_message
+        if temperature == 0:
+            self.cache[cache_key] = assistant_message
+
+    def clear(self) -> None:
+        self.messages = []
+        self.response = {}
+
+    def __getitem__(self, key: str) -> str:
+        return self.response[key]
+
+    def __str__(self) -> str:
+        formatted_messages = []
+        for message in self.messages:
+            role_tag = f"<{message['role']}>"
+            end_tag = f"</{message['role']}>"
+            formatted_messages.append(f"{role_tag}\n{message['content']}\n{end_tag}")
+        return "\n".join(formatted_messages)
+
+# Context managers for user and assistant roles
+class user:
+    def __enter__(self) -> None:
+        set_current_role("user")
+
+    def __exit__(self, _exc_type: Optional[BaseException], _exc_val: Optional[BaseException], _exc_tb: Optional[types.TracebackType]) -> None:
+        set_current_role(None)
+
+class assistant:
+    def __enter__(self) -> None:
+        set_current_role("assistant")
+
+    def __exit__(self, _exc_type: Optional[BaseException], _exc_val: Optional[BaseException], _exc_tb: Optional[types.TracebackType]) -> None:
+        set_current_role(None)
+
+class system:
+    def __enter__(self) -> None:
+        set_current_role("system")
+
+    def __exit__(self, _exc_type: Optional[BaseException], _exc_val: Optional[BaseException], _exc_tb: Optional[types.TracebackType]) -> None:
+        set_current_role(None)
+
+
+---
+./files_to_prompt/__main__.py
+---
+from files_to_prompt import cli
+
+if __name__ == "__main__":
+    cli()
+
+
+---
+./util/functions
+---
+#! /bin/bash
+# shellcheck disable=SC2207 # Arrays are a pain in bash 3
+
+echo "functions assume they are run from repo root"
+echo "run \"list\" for a list of helpers"
+
+INIT_LOCATION="$0"
+
+list(){
+    ./util/bash_includes/list.awk "$INIT_LOCATION"
+}
+
+## External
+
+run() { # Feedback
+   poetry run python ./files_to_prompt/__main__.py "$@"
+}
+
+draft-feedback-delete(){
+    find ./writing -type f -regex ".*/output/.*[0-9]\{4\}.*\.md" -exec rm {} \;
+}
+
+check_code() {
+    poetry run ruff . --fix
+    poetry run mypy --disallow-untyped-defs --exclude '/data/' .
+    poetry run vulture --exclude '/data/,paragraph_parser.py' ./util/feedback
+}
+
+test_code() {
+    echo "Excluding LLM tests"
+    poetry run pytest -m "not llm" -s
+}
+
+test_marked_code() {
+    poetry run pytest -m this -s --durations=0
+}
+
+
+test_llm_code() {
+    echo "Running LLM marked tests"
+    poetry run pytest -m llm -s
+}
+
+
+---
+./util/bash_includes/list.awk
+---
+#!/usr/bin/env -S gawk -f
+
+# Print functions, but only following "External"
+BEGIN { 
+    printf "function        \t description\n"
+    printf "----------------\t -----------------------------------------------------------------\n"
+}
+$2 == "External" { external=1 }
+$1 ~/\(\)/{ 
+    if (external==1){
+        f=substr($1, 0, index($1,"(")-1)
+        if (substr(f,1,1) != "_")
+        {
+            if(index($0,"#"))
+                printf "%-20s \t %-60s\n",f, substr($0, index($0,"#")+1)
+            else 
+                print f
+        }
+    }
+}
+END {
+    printf "-----------------------------------------------------------------------------------------\n"
+}
+
+
+---
+./tests/test_files_to_prompt.py
+---
+import os
+from click.testing import CliRunner
+from files_to_prompt.cli import cli
+
+
+def test_basic_functionality(tmpdir):
+    runner = CliRunner()
+    with tmpdir.as_cwd():
+        os.makedirs("test_dir")
+        with open("test_dir/file1.txt", "w") as f:
+            f.write("Contents of file1")
+        with open("test_dir/file2.txt", "w") as f:
+            f.write("Contents of file2")
+
+        result = runner.invoke(cli, ["test_dir"])
+        assert result.exit_code == 0
+        assert "test_dir/file1.txt" in result.output
+        assert "Contents of file1" in result.output
+        assert "test_dir/file2.txt" in result.output
+        assert "Contents of file2" in result.output
+
+
+def test_include_hidden(tmpdir):
+    runner = CliRunner()
+    with tmpdir.as_cwd():
+        os.makedirs("test_dir")
+        with open("test_dir/.hidden.txt", "w") as f:
+            f.write("Contents of hidden file")
+
+        result = runner.invoke(cli, ["test_dir"])
+        assert result.exit_code == 0
+        assert "test_dir/.hidden.txt" not in result.output
+
+        result = runner.invoke(cli, ["test_dir", "--include-hidden"])
+        assert result.exit_code == 0
+        assert "test_dir/.hidden.txt" in result.output
+        assert "Contents of hidden file" in result.output
+
+
+def test_ignore_gitignore(tmpdir):
+    runner = CliRunner()
+    with tmpdir.as_cwd():
+        os.makedirs("test_dir")
+        with open("test_dir/.gitignore", "w") as f:
+            f.write("ignored.txt")
+        with open("test_dir/ignored.txt", "w") as f:
+            f.write("This file should be ignored")
+        with open("test_dir/included.txt", "w") as f:
+            f.write("This file should be included")
+
+        result = runner.invoke(cli, ["test_dir"])
+        assert result.exit_code == 0
+        assert "test_dir/ignored.txt" not in result.output
+        assert "test_dir/included.txt" in result.output
+
+        result = runner.invoke(cli, ["test_dir", "--ignore-gitignore"])
+        assert result.exit_code == 0
+        assert "test_dir/ignored.txt" in result.output
+        assert "This file should be ignored" in result.output
+        assert "test_dir/included.txt" in result.output
+
+
+def test_multiple_paths(tmpdir):
+    runner = CliRunner()
+    with tmpdir.as_cwd():
+        os.makedirs("test_dir1")
+        with open("test_dir1/file1.txt", "w") as f:
+            f.write("Contents of file1")
+        os.makedirs("test_dir2")
+        with open("test_dir2/file2.txt", "w") as f:
+            f.write("Contents of file2")
+        with open("single_file.txt", "w") as f:
+            f.write("Contents of single file")
+
+        result = runner.invoke(cli, ["test_dir1", "test_dir2", "single_file.txt"])
+        assert result.exit_code == 0
+        assert "test_dir1/file1.txt" in result.output
+        assert "Contents of file1" in result.output
+        assert "test_dir2/file2.txt" in result.output
+        assert "Contents of file2" in result.output
+        assert "single_file.txt" in result.output
+        assert "Contents of single file" in result.output
+
+
+def test_ignore_patterns(tmpdir):
+    runner = CliRunner()
+    with tmpdir.as_cwd():
+        os.makedirs("test_dir")
+        with open("test_dir/file_to_ignore.txt", "w") as f:
+            f.write("This file should be ignored due to ignore patterns")
+        with open("test_dir/file_to_include.txt", "w") as f:
+            f.write("This file should be included")
+
+        result = runner.invoke(cli, ["test_dir", "--ignore", "*.txt"])
+        assert result.exit_code == 0
+        assert "test_dir/file_to_ignore.txt" not in result.output
+        assert "This file should be ignored due to ignore patterns" not in result.output
+        assert "test_dir/file_to_include.txt" not in result.output
+
+        result = runner.invoke(cli, ["test_dir", "--ignore", "file_to_ignore.*"])
+        assert result.exit_code == 0
+        assert "test_dir/file_to_ignore.txt" not in result.output
+        assert "This file should be ignored due to ignore patterns" not in result.output
+        assert "test_dir/file_to_include.txt" in result.output
+        assert "This file should be included" in result.output
+
+
+def test_mixed_paths_with_options(tmpdir):
+    runner = CliRunner()
+    with tmpdir.as_cwd():
+        os.makedirs("test_dir")
+        with open("test_dir/.gitignore", "w") as f:
+            f.write("ignored_in_gitignore.txt\n.hidden_ignored_in_gitignore.txt")
+        with open("test_dir/ignored_in_gitignore.txt", "w") as f:
+            f.write("This file should be ignored by .gitignore")
+        with open("test_dir/.hidden_ignored_in_gitignore.txt", "w") as f:
+            f.write("This hidden file should be ignored by .gitignore")
+        with open("test_dir/included.txt", "w") as f:
+            f.write("This file should be included")
+        with open("test_dir/.hidden_included.txt", "w") as f:
+            f.write("This hidden file should be included")
+        with open("single_file.txt", "w") as f:
+            f.write("Contents of single file")
+
+        result = runner.invoke(cli, ["test_dir", "single_file.txt"])
+        assert result.exit_code == 0
+        assert "test_dir/ignored_in_gitignore.txt" not in result.output
+        assert "test_dir/.hidden_ignored_in_gitignore.txt" not in result.output
+        assert "test_dir/included.txt" in result.output
+        assert "test_dir/.hidden_included.txt" not in result.output
+        assert "single_file.txt" in result.output
+        assert "Contents of single file" in result.output
+
+        result = runner.invoke(cli, ["test_dir", "single_file.txt", "--include-hidden"])
+        assert result.exit_code == 0
+        assert "test_dir/ignored_in_gitignore.txt" not in result.output
+        assert "test_dir/.hidden_ignored_in_gitignore.txt" not in result.output
+        assert "test_dir/included.txt" in result.output
+        assert "test_dir/.hidden_included.txt" in result.output
+        assert "single_file.txt" in result.output
+        assert "Contents of single file" in result.output
+
+        result = runner.invoke(
+            cli, ["test_dir", "single_file.txt", "--ignore-gitignore"]
+        )
+        assert result.exit_code == 0
+        assert "test_dir/ignored_in_gitignore.txt" in result.output
+        assert "test_dir/.hidden_ignored_in_gitignore.txt" not in result.output
+        assert "test_dir/included.txt" in result.output
+        assert "test_dir/.hidden_included.txt" not in result.output
+        assert "single_file.txt" in result.output
+        assert "Contents of single file" in result.output
+
+        result = runner.invoke(
+            cli,
+            ["test_dir", "single_file.txt", "--ignore-gitignore", "--include-hidden"],
+        )
+        assert result.exit_code == 0
+        assert "test_dir/ignored_in_gitignore.txt" in result.output
+        assert "test_dir/.hidden_ignored_in_gitignore.txt" in result.output
+        assert "test_dir/included.txt" in result.output
+        assert "test_dir/.hidden_included.txt" in result.output
+        assert "single_file.txt" in result.output
+        assert "Contents of single file" in result.output
+
+
+def test_binary_file_warning(tmpdir):
+    runner = CliRunner(mix_stderr=False)
+    with tmpdir.as_cwd():
+        os.makedirs("test_dir")
+        with open("test_dir/binary_file.bin", "wb") as f:
+            f.write(b"\xff")
+        with open("test_dir/text_file.txt", "w") as f:
+            f.write("This is a text file")
+
+        result = runner.invoke(cli, ["test_dir"])
+        assert result.exit_code == 0
+
+        stdout = result.stdout
+        stderr = result.stderr
+
+        assert "test_dir/text_file.txt" in stdout
+        assert "This is a text file" in stdout
+        assert "\ntest_dir/binary_file.bin" not in stdout
+        assert (
+            "Warning: Skipping file test_dir/binary_file.bin due to UnicodeDecodeError"
+            in stderr
+        )
+
+
+---

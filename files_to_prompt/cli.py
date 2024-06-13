@@ -2,7 +2,6 @@ import os
 import click
 from fnmatch import fnmatch
 
-
 def should_ignore(path, gitignore_rules):
     for rule in gitignore_rules:
         if fnmatch(os.path.basename(path), rule):
