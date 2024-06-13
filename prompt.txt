@@ -1,18 +1,201 @@
-Request...
-/Users/adam/sandbox/earthly/ast/listener.go
+/Users/adam/sandbox/earthly/ast/version.go
+---
+package ast
+
+import (
+	"github.com/earthly/earthly/ast/spec"
+)
+
+// ParseVersion reads the VERSION command from an Earthfile and returns a spec.Version object.
+// It accepts a file path and a boolean to enable source mapping.
+func ParseVersion(filePath string, enableSourceMap bool) (*spec.Version, error) { ... }
+
+// ParseVersionOpts reads the VERSION command from an Earthfile using functional options to modify parsing behavior.
+// It returns a spec.Version object. This function allows more flexible configuration through options.
+func ParseVersionOpts(fromOpt FromOpt, opts ...Opt) (*spec.Version, error) { ... }
+
+---
+/Users/adam/sandbox/earthly/ast/env_var.go
+---
+package ast
+
+import "regexp"
+
+var envVarNameRegexp = regexp.MustCompile(`^[a-zA-Z_]+[a-zA-Z0-9_]*$`)
+
+// IsValidEnvVarName returns true if env name is valid
+func IsValidEnvVarName(name string) bool {
+	return envVarNameRegexp.MatchString(name)
+}
+
+
+---
+/Users/adam/sandbox/earthly/ast/validator.go
+---
+package ast
+
+import (
+	"github.com/earthly/earthly/ast/spec"
+	"github.com/pkg/errors"
+)
+
+// Provides validation functions for Earthfile specifications, ensuring that the structure and versioning of the Earthfile meet the expected criteria.
+
+// Represents a function that validates an Earthfile and returns a list of errors.
+type astValidator func(spec.Earthfile) []error
+
+// Validates the entire AST of an Earthfile.
+func validateAst(ef spec.Earthfile) error { ... }
+
+// Validates the version specified in an Earthfile against a list of valid versions.
+func validVersion(ef spec.Earthfile) []error { ... }
+
+// Ensures no two targets within an Earthfile have the same name.
+func noTargetsWithSameName(ef spec.Earthfile) []error { ... }
+
+// Ensures no targets within an Earthfile use reserved keywords as names.
+func noTargetsWithKeywords(ef spec.Earthfile) []error { ... }
+
+---
+/Users/adam/sandbox/earthly/ast/ast_test.go
+---
+package ast_test
+
+// This file contains unit tests for the AST parsing functionality, specifically focusing on parsing Earthfiles. It tests various scenarios including handling of commands, comments, and documentation within Earthfiles.
+
+// A custom reader that embeds a strings.Reader and implements the NamedReader interface.
+type namedStringReader struct {
+	*strings.Reader
+}
+
+// Returns a fixed name, simulating a file name.
+func (n *namedStringReader) Name() string { ... }
+
+// TestParse runs a series of tests to ensure that Earthfiles are parsed correctly.
+func TestParse(t *testing.T) { ... }
+
+---
+/Users/adam/sandbox/earthly/ast/lexer.go
 ---
 package ast
 
 import (
 	"github.com/antlr/antlr4/runtime/Go/antlr/v4"
 	"github.com/earthly/earthly/ast/parser"
+)
+
+// lexer is a lexer for an earthly file, which also emits indentation
+// and dedentation tokens.
+type lexer struct {
+	*parser.EarthLexer
+
+	prevIndentLevel  int
+	indentLevel      int
+	afterNewLine     bool
+	afterLineComment bool
+
+	tokenQueue                                   []antlr.Token
+	wsChannel, wsStart, wsStop, wsLine, wsColumn int
+
+	err error
+
+	debug bool
+}
+
+// Creates a new lexer instance for parsing Earthly files.
+func newLexer(input antlr.CharStream) *lexer { ... }
+
+// Returns any error that occurred during lexing.
+func (l *lexer) Err() error { ... }
+
+// Retrieves the next token from the input stream, processing indentation and special cases.
+func (l *lexer) NextToken() antlr.Token { ... }
+
+---
+/Users/adam/sandbox/earthly/ast/ast.go
+---
+package ast
+
+import (
+	"context"
 	"github.com/earthly/earthly/ast/spec"
 )
 
-// This file defines the structure and methods for parsing Earthly AST using ANTLR.
-// It includes the listener implementation that constructs the AST from parsed tokens.
+// Parse parses an Earthfile into an AST, optionally enabling source mapping.
+func Parse(ctx context.Context, filePath string, enableSourceMap bool) (spec.Earthfile, error) { ... }
 
-// block holds the parsed block of statements and directives.
+// ParseOpts parses an Earthfile into an AST using functional options to customize the parsing process.
+func ParseOpts(ctx context.Context, from FromOpt, opts ...Opt) (spec.Earthfile, error) { ... }
+
+// walkTree walks through the parsed tree to construct an Earthfile AST.
+func walkTree(l *listener, tree parser.IEarthFileContext) (spec.Earthfile, error) { ... }
+
+// newEarthfileTree initializes the parsing process for an Earthfile, setting up error handling and token streams.
+func newEarthfileTree(body string, errorListener *antlrhandler.ReturnErrorListener, errorStrategy antlr.ErrorStrategy) (*antlr.CommonTokenStream, parser.IEarthFileContext, error) { ... }
+
+---
+/Users/adam/sandbox/earthly/ast/version_test.go
+---
+package ast_test
+
+// This file contains tests for the ast package, specifically testing the parsing of version information from a given source using the ast.ParseVersionOpts function. The tests ensure that the version is correctly parsed and that the resulting data structure is as expected. 
+
+// No exported types or functions to include as the test file does not define any new types or functions for external use.
+
+---
+/Users/adam/sandbox/earthly/ast/prefs.go
+---
+package ast
+
+// This package provides functionality to parse versions with customizable options. It includes mechanisms to set up the source from which the version is read, whether it's a file or a direct reader, and to optionally enable source mapping for the parsing process.
+
+// Opt is an option function for customizing the behavior of ParseVersion.
+type Opt func(prefs) (prefs, error)
+
+// WithSourceMap enables a source map when parsing versions.
+func WithSourceMap() Opt { ... }
+
+// FromOpt is an option function for customizing the source reader of ParseVersion.
+type FromOpt func(prefs) (prefs, error)
+
+// FromPath configures ParseVersion to open and read from a file at the specified path.
+func FromPath(path string) FromOpt { ... }
+
+// NamedReader is an interface for an io.Reader with additional capabilities like naming and seeking.
+type NamedReader interface {
+	Name() string
+	Seek(offset int64, whence int) (int64, error)
+	Read(buff []byte) (n int, err error)
+}
+
+// FromReader configures ParseVersion to read from the provided NamedReader.
+func FromReader(r NamedReader) FromOpt { ... }
+
+---
+/Users/adam/sandbox/earthly/ast/parse_errors_test.go
+---
+package ast_test
+
+// This file contains tests for the AST parser, specifically focusing on error handling and providing hints for common syntax mistakes in Earthfile configurations.
+
+// Tests parser error handling and hint generation for common syntax errors.
+func TestParserErrors(t *testing.T) { ... }
+
+---
+/Users/adam/sandbox/earthly/ast/listener.go
+---
+package ast
+
+import (
+	"context"
+	"github.com/antlr/antlr4/runtime/Go/antlr/v4"
+	"github.com/earthly/earthly/ast/parser"
+	"github.com/earthly/earthly/ast/spec"
+)
+
+// This file defines the structure and methods for parsing Earthly build files using ANTLR.
+// It includes the definition of a listener that processes parsed elements to construct an Earthfile model.
+
 type block struct {
 	block         spec.Block
 	statement     *spec.Statement
@@ -24,7 +207,6 @@ type block struct {
 	waitStatement *spec.WaitStatement
 }
 
-// listener is an implementation of EarthParserListener that constructs the AST.
 type listener struct {
 	*parser.BaseEarthParserListener
 
@@ -45,196 +227,1466 @@ type listener struct {
 	err error
 }
 
-// newListener creates a new listener instance for parsing.
+// Creates a new listener for parsing Earthfiles.
 func newListener(ctx context.Context, stream *antlr.CommonTokenStream, filePath string, enableSourceMap bool) *listener { ... }
 
-// Err returns any parsing errors encountered by the listener.
+// Retrieves any error that occurred during parsing.
 func (l *listener) Err() error { ... }
 
-// Earthfile returns the parsed Earthfile.
+// Returns the parsed Earthfile.
 func (l *listener) Earthfile() spec.Earthfile { ... }
 
-// EnterEarthFile is called when parsing enters the EarthFile rule.
+// Internal methods to manage block contexts.
+func (l *listener) block() *block { ... }
+func (l *listener) pushNewBlock() { ... }
+func (l *listener) popBlock() spec.Block { ... }
+
+// Listener methods for entering and exiting various parser rules.
 func (l *listener) EnterEarthFile(c *parser.EarthFileContext) { ... }
-
-// ExitEarthFile is called when parsing exits the EarthFile rule.
 func (l *listener) ExitEarthFile(c *parser.EarthFileContext) { ... }
-
-// EnterTarget is called when parsing enters the Target rule.
 func (l *listener) EnterTarget(c *parser.TargetContext) { ... }
-
-// EnterTargetHeader is called when parsing enters the TargetHeader rule.
 func (l *listener) EnterTargetHeader(c *parser.TargetHeaderContext) { ... }
-
-// ExitTarget is called when parsing exits the Target rule.
 func (l *listener) ExitTarget(c *parser.TargetContext) { ... }
-
-// EnterUserCommand is called when parsing enters the UserCommand rule.
 func (l *listener) EnterUserCommand(c *parser.UserCommandContext) { ... }
-
-// EnterUserCommandHeader is called when parsing enters the UserCommandHeader rule.
 func (l *listener) EnterUserCommandHeader(c *parser.UserCommandHeaderContext) { ... }
-
-// ExitUserCommand is called when parsing exits the UserCommand rule.
 func (l *listener) ExitUserCommand(c *parser.UserCommandContext) { ... }
-
-// EnterFunction is called when parsing enters the Function rule.
 func (l *listener) EnterFunction(c *parser.FunctionContext) { ... }
-
-// EnterFunctionHeader is called when parsing enters the FunctionHeader rule.
 func (l *listener) EnterFunctionHeader(c *parser.FunctionHeaderContext) { ... }
-
-// ExitFunction is called when parsing exits the Function rule.
 func (l *listener) ExitFunction(c *parser.FunctionContext) { ... }
-
-// EnterStmt is called when parsing enters the Stmt rule.
 func (l *listener) EnterStmt(c *parser.StmtContext) { ... }
-
-// ExitStmt is called when parsing exits the Stmt rule.
 func (l *listener) ExitStmt(c *parser.StmtContext) { ... }
-
-// EnterCommandStmt is called when parsing enters the CommandStmt rule.
 func (l *listener) EnterCommandStmt(c *parser.CommandStmtContext) { ... }
-
-// ExitCommandStmt is called when parsing exits the CommandStmt rule.
 func (l *listener) ExitCommandStmt(c *parser.CommandStmtContext) { ... }
-
-// EnterWithStmt is called when parsing enters the WithStmt rule.
 func (l *listener) EnterWithStmt(c *parser.WithStmtContext) { ... }
-
-// ExitWithStmt is called when parsing exits the WithStmt rule.
 func (l *listener) ExitWithStmt(c *parser.WithStmtContext) { ... }
-
-// EnterWithBlock is called when parsing enters the WithBlock rule.
 func (l *listener) EnterWithBlock(c *parser.WithBlockContext) { ... }
-
-// ExitWithBlock is called when parsing exits the WithBlock rule.
 func (l *listener) ExitWithBlock(c *parser.WithBlockContext) { ... }
-
-// EnterWithCommand is called when parsing enters the WithCommand rule.
 func (l *listener) EnterWithCommand(c *parser.WithCommandContext) { ... }
-
-// ExitWithCommand is called when parsing exits the WithCommand rule.
 func (l *listener) ExitWithCommand(c *parser.WithCommandContext) { ... }
-
-// EnterIfStmt is called when parsing enters the IfStmt rule.
 func (l *listener) EnterIfStmt(c *parser.IfStmtContext) { ... }
-
-// ExitIfStmt is called when parsing exits the IfStmt rule.
 func (l *listener) ExitIfStmt(c *parser.IfStmtContext) { ... }
-
-// EnterIfExpr is called when parsing enters the IfExpr rule.
 func (l *listener) EnterIfExpr(c *parser.IfExprContext) { ... }
-
-// ExitIfExpr is called when parsing exits the IfExpr rule.
 func (l *listener) ExitIfExpr(c *parser.IfExprContext) { ... }
-
-// EnterIfBlock is called when parsing enters the IfBlock rule.
 func (l *listener) EnterIfBlock(c *parser.IfBlockContext) { ... }
-
-// ExitIfBlock is called when parsing exits the IfBlock rule.
 func (l *listener) ExitIfBlock(c *parser.IfBlockContext) { ... }
-
-// EnterElseIfClause is called when parsing enters the ElseIfClause rule.
 func (l *listener) EnterElseIfClause(c *parser.ElseIfClauseContext) { ... }
-
-// ExitElseIfClause is called when parsing exits the ElseIfClause rule.
 func (l *listener) ExitElseIfClause(c *parser.ElseIfClauseContext) { ... }
-
-// EnterElseIfExpr is called when parsing enters the ElseIfExpr rule.
 func (l *listener) EnterElseIfExpr(c *parser.ElseIfExprContext) { ... }
-
-// ExitElseIfExpr is called when parsing exits the ElseIfExpr rule.
 func (l *listener) ExitElseIfExpr(c *parser.ElseIfExprContext) { ... }
-
-// EnterElseIfBlock is called when parsing enters the ElseIfBlock rule.
 func (l *listener) EnterElseIfBlock(c *parser.ElseIfBlockContext) { ... }
-
-// ExitElseIfBlock is called when parsing exits the ElseIfBlock rule.
 func (l *listener) ExitElseIfBlock(c *parser.ElseIfBlockContext) { ... }
-
-// EnterElseBlock is called when parsing enters the ElseBlock rule.
 func (l *listener) EnterElseBlock(c *parser.ElseBlockContext) { ... }
-
-// ExitElseBlock is called when parsing exits the ElseBlock rule.
 func (l *listener) ExitElseBlock(c *parser.ElseBlockContext) { ... }
-
-// EnterTryStmt is called when parsing enters the TryStmt rule.
 func (l *listener) EnterTryStmt(c *parser.TryStmtContext) { ... }
-
-// ExitTryStmt is called when parsing exits the TryStmt rule.
 func (l *listener) ExitTryStmt(c *parser.TryStmtContext) { ... }
-
-// EnterTryBlock is called when parsing enters the TryBlock rule.
 func (l *listener) EnterTryBlock(c *parser.TryBlockContext) { ... }
-
-// ExitTryBlock is called when parsing exits the TryBlock rule.
 func (l *listener) ExitTryBlock(c *parser.TryBlockContext) { ... }
-
-// EnterCatchBlock is called when parsing enters the CatchBlock rule.
 func (l *listener) EnterCatchBlock(c *parser.CatchBlockContext) { ... }
-
-// ExitCatchBlock is called when parsing exits the CatchBlock rule.
 func (l *listener) ExitCatchBlock(c *parser.CatchBlockContext) { ... }
-
-// EnterFinallyBlock is called when parsing enters the FinallyBlock rule.
 func (l *listener) EnterFinallyBlock(c *parser.FinallyBlockContext) { ... }
-
-// ExitFinallyBlock is called when parsing exits the FinallyBlock rule.
 func (l *listener) ExitFinallyBlock(c *parser.FinallyBlockContext) { ... }
-
-// EnterForStmt is called when parsing enters the ForStmt rule.
 func (l *listener) EnterForStmt(c *parser.ForStmtContext) { ... }
-
-// ExitForStmt is called when parsing exits the ForStmt rule.
 func (l *listener) ExitForStmt(c *parser.ForStmtContext) { ... }
-
-// EnterForExpr is called when parsing enters the ForExpr rule.
 func (l *listener) EnterForExpr(c *parser.ForExprContext) { ... }
-
-// ExitForExpr is called when parsing exits the ForExpr rule.
 func (l *listener) ExitForExpr(c *parser.ForExprContext) { ... }
-
-// EnterForBlock is called when parsing enters the ForBlock rule.
 func (l *listener) EnterForBlock(c *parser.ForBlockContext) { ... }
-
-// ExitForBlock is called when parsing exits the ForBlock rule.
 func (l *listener) ExitForBlock(c *parser.ForBlockContext) { ... }
-
-// EnterWaitStmt is called when parsing enters the WaitStmt rule.
 func (l *listener) EnterWaitStmt(c *parser.WaitStmtContext) { ... }
-
-// ExitWaitStmt is called when parsing exits the WaitStmt rule.
 func (l *listener) ExitWaitStmt(c *parser.WaitStmtContext) { ... }
-
-// EnterWaitExpr is called when parsing enters the WaitExpr rule.
 func (l *listener) EnterWaitExpr(c *parser.WaitExprContext) { ... }
-
-// ExitWaitExpr is called when parsing exits the WaitExpr rule.
 func (l *listener) ExitWaitExpr(c *parser.WaitExprContext) { ... }
-
-// EnterWaitBlock is called when parsing enters the WaitBlock rule.
 func (l *listener) EnterWaitBlock(c *parser.WaitBlockContext) { ... }
-
-// ExitWaitBlock is called when parsing exits the WaitBlock rule.
 func (l *listener) ExitWaitBlock(c *parser.WaitBlockContext) { ... }
-
-// EnterEnvArgKey is called when parsing enters the EnvArgKey rule.
 func (l *listener) EnterEnvArgKey(c *parser.EnvArgKeyContext) { ... }
-
-// EnterEnvArgValue is called when parsing enters the EnvArgValue rule.
 func (l *listener) EnterEnvArgValue(c *parser.EnvArgValueContext) { ... }
-
-// EnterLabelKey is called when parsing enters the LabelKey rule.
 func (l *listener) EnterLabelKey(c *parser.LabelKeyContext) { ... }
-
-// EnterLabelValue is called when parsing enters the LabelValue rule.
 func (l *listener) EnterLabelValue(c *parser.LabelValueContext) { ... }
-
-// ExitStmtWordsMaybeJSON is called when parsing exits the StmtWordsMaybeJSON rule.
 func (l *listener) ExitStmtWordsMaybeJSON(c *parser.StmtWordsMaybeJSONContext) { ... }
-
-// EnterStmtWord is called when parsing enters the StmtWord rule.
 func (l *listener) EnterStmtWord(c *parser.StmtWordContext) { ... }
+
+---
+/Users/adam/sandbox/earthly/ast/hint/error.go
+---
+package hint
+
+// Provides utilities for wrapping errors with hints to guide users towards potential solutions. Includes deprecated functions suggesting to use newer utilities from `utils/hint`.
+
+// Represents an error with associated user hints.
+type hintError struct {
+	err   error     // the underlying error
+	hints []string  // suggestions for resolving the error
+}
+
+// Wrap wraps up an error with hints, to help display hints to a user about what might fix the problem.
+// Deprecated: use utils/hint.Wrap instead
+func Wrap(err error, firstHint string, extraHints ...string) error { ... }
+
+// Wrapf wraps an error with a single hint with formatting arguments.
+// Deprecated: use utils/hint.Wrapf instead
+func Wrapf(err error, hintf string, args ...any) error { ... }
+
+---
+/Users/adam/sandbox/earthly/ast/spec/earthfile.go
+---
+package spec
+
+// This file defines the AST (Abstract Syntax Tree) structures for representing an Earthfile, which is a build specification for Earthly. It includes definitions for various components such as versions, targets, functions, and commands, each with potential documentation and source location metadata.
+
+// Earthfile represents the entire structure of an Earthfile including version, base recipes, targets, and functions.
+type Earthfile struct {
+	Version        *Version        `json:"version,omitempty"`
+	BaseRecipe     Block           `json:"baseRecipe"`
+	Targets        []Target        `json:"targets,omitempty"`
+	Functions      []Function      `json:"functions,omitempty"`
+	SourceLocation *SourceLocation `json:"sourceLocation,omitempty"`
+}
+
+// Target represents a build target in an Earthfile, which includes a name, optional documentation, a recipe block, and source location.
+type Target struct {
+	Name           string          `json:"name"`
+	Docs           string          `json:"docs,omitempty"`
+	Recipe         Block           `json:"recipe"`
+	SourceLocation *SourceLocation `json:"sourceLocation,omitempty"`
+}
+
+// Function represents a function definition in an Earthfile, including its name, recipe block, and source location.
+type Function struct {
+	Name           string          `json:"name"`
+	Recipe         Block           `json:"recipe"`
+	SourceLocation *SourceLocation `json:"sourceLocation,omitempty"`
+}
+
+// Version represents the version specification in an Earthfile, including arguments and source location.
+type Version struct {
+	Args           []string        `json:"args"`
+	SourceLocation *SourceLocation `json:"sourceLocation,omitempty"`
+}
+
+// Block represents a sequence of statements in an Earthfile.
+type Block []Statement
+
+// Statement represents a single statement in an Earthfile, which can be a command, with, if, try, for, or wait statement.
+type Statement struct {
+	Command        *Command        `json:"command,omitempty"`
+	With           *WithStatement  `json:"with,omitempty"`
+	If             *IfStatement    `json:"if,omitempty"`
+	Try            *TryStatement   `json:"try,omitempty"`
+	For            *ForStatement   `json:"for,omitempty"`
+	Wait           *WaitStatement  `json:"wait,omitempty"`
+	SourceLocation *SourceLocation `json:"sourceLocation,omitempty"`
+}
+
+// Command represents a command in an Earthfile, including its name, optional documentation, arguments, execution mode, and source location.
+type Command struct {
+	Name           string          `json:"name"`
+	Docs           string          `json:"docs,omitempty"`
+	Args           []string        `json:"args"`
+	ExecMode       bool            `json:"execMode,omitempty"`
+	SourceLocation *SourceLocation `json:"sourceLocation,omitempty"`
+}
+
+// WithStatement represents a 'with' block in an Earthfile, encapsulating a command and a body of statements.
+type WithStatement struct {
+	Command        Command         `json:"command"`
+	Body           Block           `json:"body"`
+	SourceLocation *SourceLocation `json:"sourceLocation,omitempty"`
+}
+
+// IfStatement represents an 'if' conditional in an Earthfile, including the condition, body, else-if clauses, else body, and source location.
+type IfStatement struct {
+	Expression     []string        `json:"expression"`
+	ExecMode       bool            `json:"execMode,omitempty"`
+	IfBody         Block           `json:"ifBody"`
+	ElseIf         []ElseIf        `json:"elseIf,omitempty"`
+	ElseBody       *Block          `json:"elseBody,omitempty"`
+	SourceLocation *SourceLocation `json:"sourceLocation,omitempty"`
+}
+
+// TryStatement represents a 'try' block in an Earthfile, including try, catch, and finally blocks along with source location.
+type TryStatement struct {
+	TryBody        Block           `json:"tryBody"`
+	CatchBody      *Block          `json:"catchBody,omitempty"`
+	FinallyBody    *Block          `json:"finallyBody,omitempty"`
+	SourceLocation *SourceLocation `json:"sourceLocation,omitempty"`
+}
+
+// ElseIf represents an 'else if' clause in an Earthfile, including the condition, body, and source location.
+type ElseIf struct {
+	Expression     []string        `json:"expression"`
+	ExecMode       bool            `json:"execMode,omitempty"`
+	Body           Block           `json:"body"`
+	SourceLocation *SourceLocation `json:"sourceLocation,omitempty"`
+}
+
+// ForStatement represents a 'for' loop in an Earthfile, including the loop arguments, body, and source location.
+type ForStatement struct {
+	Args           []string        `json:"args"`
+	Body           Block           `json:"body"`
+	SourceLocation *SourceLocation `json:"sourceLocation,omitempty"`
+}
+
+// WaitStatement represents a 'wait' statement in an Earthfile, including the arguments, body, and source location.
+type WaitStatement struct {
+	Args           []string        `json:"args"`
+	Body           Block           `json:"body"`
+	SourceLocation *SourceLocation `json:"sourceLocation,omitempty"`
+}
+
+// SourceLocation provides details about the location of a statement or element within the source Earthfile.
+type SourceLocation struct {
+	File        string `json:"file,omitempty"`
+	StartLine   int    `json:"startLine"`
+	StartColumn int    `json:"startColumn"`
+	EndLine     int    `json:"endLine"`
+	EndColumn   int    `json:"endColumn"`
+}
+
+---
+/Users/adam/sandbox/earthly/ast/parser/earthparser_base_listener.go
+---
+// This Go file is part of the Earthly build system's parser module. It defines a base listener for the EarthParser, which is generated by ANTLR. The listener provides empty implementations for all callback methods defined in the EarthParserListener interface, which are invoked during the parsing of an Earthly build file.
+
+package parser // EarthParser
+
+// BaseEarthParserListener provides empty implementations for all methods of the EarthParserListener interface.
+type BaseEarthParserListener struct{}
+
+// VisitTerminal is called when a terminal node is visited.
+func (s *BaseEarthParserListener) VisitTerminal(node antlr.TerminalNode) {}
+
+// VisitErrorNode is called when an error node is visited.
+func (s *BaseEarthParserListener) VisitErrorNode(node antlr.ErrorNode) {}
+
+// EnterEveryRule is called when any rule is entered.
+func (s *BaseEarthParserListener) EnterEveryRule(ctx antlr.ParserRuleContext) {}
+
+// ExitEveryRule is called when any rule is exited.
+func (s *BaseEarthParserListener) ExitEveryRule(ctx antlr.ParserRuleContext) {}
+
+// EnterEarthFile is called when the 'earthFile' production is entered.
+func (s *BaseEarthParserListener) EnterEarthFile(ctx *EarthFileContext) {}
+
+// ExitEarthFile is called when the 'earthFile' production is exited.
+func (s *BaseEarthParserListener) ExitEarthFile(ctx *EarthFileContext) {}
+
+// EnterTargets is called when the 'targets' production is entered.
+func (s *BaseEarthParserListener) EnterTargets(ctx *TargetsContext) {}
+
+// ExitTargets is called when the 'targets' production is exited.
+func (s *BaseEarthParserListener) ExitTargets(ctx *TargetsContext) {}
+
+// EnterTargetOrUserCommand is called when the 'targetOrUserCommand' production is entered.
+func (s *BaseEarthParserListener) EnterTargetOrUserCommand(ctx *TargetOrUserCommandContext) {}
+
+// ExitTargetOrUserCommand is called when the 'targetOrUserCommand' production is exited.
+func (s *BaseEarthParserListener) ExitTargetOrUserCommand(ctx *TargetOrUserCommandContext) {}
+
+// EnterTarget is called when the 'target' production is entered.
+func (s *BaseEarthParserListener) EnterTarget(ctx *TargetContext) {}
+
+// ExitTarget is called when the 'target' production is exited.
+func (s *BaseEarthParserListener) ExitTarget(ctx *TargetContext) {}
+
+// EnterTargetHeader is called when the 'targetHeader' production is entered.
+func (s *BaseEarthParserListener) EnterTargetHeader(ctx *TargetHeaderContext) {}
+
+// ExitTargetHeader is called when the 'targetHeader' production is exited.
+func (s *BaseEarthParserListener) ExitTargetHeader(ctx *TargetHeaderContext) {}
+
+// EnterUserCommand is called when the 'userCommand' production is entered.
+func (s *BaseEarthParserListener) EnterUserCommand(ctx *UserCommandContext) {}
+
+// ExitUserCommand is called when the 'userCommand' production is exited.
+func (s *BaseEarthParserListener) ExitUserCommand(ctx *UserCommandContext) {}
+
+// EnterUserCommandHeader is called when the 'userCommandHeader' production is entered.
+func (s *BaseEarthParserListener) EnterUserCommandHeader(ctx *UserCommandHeaderContext) {}
+
+// ExitUserCommandHeader is called when the 'userCommandHeader' production is exited.
+func (s *BaseEarthParserListener) ExitUserCommandHeader(ctx *UserCommandHeaderContext) {}
+
+// EnterFunction is called when the 'function' production is entered.
+func (s *BaseEarthParserListener) EnterFunction(ctx *FunctionContext) {}
+
+// ExitFunction is called when the 'function' production is exited.
+func (s *BaseEarthParserListener) ExitFunction(ctx *FunctionContext) {}
+
+// EnterFunctionHeader is called when the 'functionHeader' production is entered.
+func (s *BaseEarthParserListener) EnterFunctionHeader(ctx *FunctionHeaderContext) {}
+
+// ExitFunctionHeader is called when the 'functionHeader' production is exited.
+func (s *BaseEarthParserListener) ExitFunctionHeader(ctx *FunctionHeaderContext) {}
+
+// EnterStmts is called when the 'stmts' production is entered.
+func (s *BaseEarthParserListener) EnterStmts(ctx *StmtsContext) {}
+
+// ExitStmts is called when the 'stmts' production is exited.
+func (s *BaseEarthParserListener) ExitStmts(ctx *StmtsContext) {}
+
+// EnterStmt is called when the 'stmt' production is entered.
+func (s *BaseEarthParserListener) EnterStmt(ctx *StmtContext) {}
+
+// ExitStmt is called when the 'stmt' production is exited.
+func (s *BaseEarthParserListener) ExitStmt(ctx *StmtContext) {}
+
+// EnterCommandStmt is called when the 'commandStmt' production is entered.
+func (s *BaseEarthParserListener) EnterCommandStmt(ctx *CommandStmtContext) {}
+
+// ExitCommandStmt is called when the 'commandStmt' production is exited.
+func (s *BaseEarthParserListener) ExitCommandStmt(ctx *CommandStmtContext) {}
+
+// EnterVersion is called when the 'version' production is entered.
+func (s *BaseEarthParserListener) EnterVersion(ctx *VersionContext) {}
+
+// ExitVersion is called when the 'version' production is exited.
+func (s *BaseEarthParserListener) ExitVersion(ctx *VersionContext) {}
+
+// EnterWithStmt is called when the 'withStmt' production is entered.
+func (s *BaseEarthParserListener) EnterWithStmt(ctx *WithStmtContext) {}
+
+// ExitWithStmt is called when the 'withStmt' production is exited.
+func (s *BaseEarthParserListener) ExitWithStmt(ctx *WithStmtContext) {}
+
+// EnterWithBlock is called when the 'withBlock' production is entered.
+func (s *BaseEarthParserListener) EnterWithBlock(ctx *WithBlockContext) {}
+
+// ExitWithBlock is called when the 'withBlock' production is exited.
+func (s *BaseEarthParserListener) ExitWithBlock(ctx *WithBlockContext) {}
+
+// EnterWithExpr is called when the 'withExpr' production is entered.
+func (s *BaseEarthParserListener) EnterWithExpr(ctx *WithExprContext) {}
+
+// ExitWithExpr is called when the 'withExpr' production is exited.
+func (s *BaseEarthParserListener) ExitWithExpr(ctx *WithExprContext) {}
+
+// EnterWithCommand is called when the 'withCommand' production is entered.
+func (s *BaseEarthParserListener) EnterWithCommand(ctx *WithCommandContext) {}
+
+// ExitWithCommand is called when the 'withCommand' production is exited.
+func (s *BaseEarthParserListener) ExitWithCommand(ctx *WithCommandContext) {}
+
+// EnterDockerCommand is called when the 'dockerCommand' production is entered.
+func (s *BaseEarthParserListener) EnterDockerCommand(ctx *DockerCommandContext) {}
+
+// ExitDockerCommand is called when the 'dockerCommand' production is exited.
+func (s *BaseEarthParserListener) ExitDockerCommand(ctx *DockerCommandContext) {}
+
+// EnterIfStmt is called when the 'ifStmt' production is entered.
+func (s *BaseEarthParserListener) EnterIfStmt(ctx *IfStmtContext) {}
+
+// ExitIfStmt is called when the 'ifStmt' production is exited.
+func (s *BaseEarthParserListener) ExitIfStmt(ctx *IfStmtContext) {}
+
+// EnterIfClause is called when the 'ifClause' production is entered.
+func (s *BaseEarthParserListener) EnterIfClause(ctx *IfClauseContext) {}
+
+// ExitIfClause is called when the 'ifClause' production is exited.
+func (s *BaseEarthParserListener) ExitIfClause(ctx *IfClauseContext) {}
+
+// EnterIfBlock is called when the 'ifBlock' production is entered.
+func (s *BaseEarthParserListener) EnterIfBlock(ctx *IfBlockContext) {}
+
+// ExitIfBlock is called when the 'ifBlock' production is exited.
+func (s *BaseEarthParserListener) ExitIfBlock(ctx *IfBlockContext) {}
+
+// EnterElseIfClause is called when the 'elseIfClause' production is entered.
+func (s *BaseEarthParserListener) EnterElseIfClause(ctx *ElseIfClauseContext) {}
+
+// ExitElseIfClause is called when the 'elseIfClause' production is exited.
+func (s *BaseEarthParserListener) ExitElseIfClause(ctx *ElseIfClauseContext) {}
+
+// EnterElseIfBlock is called when the 'elseIfBlock' production is entered.
+func (s *BaseEarthParserListener) EnterElseIfBlock(ctx *ElseIfBlockContext) {}
+
+// ExitElseIfBlock is called when the 'elseIfBlock' production is exited.
+func (s *BaseEarthParserListener) ExitElseIfBlock(ctx *ElseIfBlockContext) {}
+
+// EnterElseClause is called when the 'elseClause' production is entered.
+func (s *BaseEarthParserListener) EnterElseClause(ctx *ElseClauseContext) {}
+
+// ExitElseClause is called when the 'elseClause' production is exited.
+func (s *BaseEarthParserListener) ExitElseClause(ctx *ElseClauseContext) {}
+
+// EnterElseBlock is called when the 'elseBlock' production is entered.
+func (s *BaseEarthParserListener) EnterElseBlock(ctx *ElseBlockContext) {}
+
+// ExitElseBlock is called when the 'elseBlock' production is exited.
+func (s *BaseEarthParserListener) ExitElseBlock(ctx *ElseBlockContext) {}
+
+// EnterIfExpr is called when the 'ifExpr' production is entered.
+func (s *BaseEarthParserListener) EnterIfExpr(ctx *IfExprContext) {}
+
+// ExitIfExpr is called when the 'ifExpr' production is exited.
+func (s *BaseEarthParserListener) ExitIfExpr(ctx *IfExprContext) {}
+
+// EnterElseIfExpr is called when the 'elseIfExpr' production is entered.
+func (s *BaseEarthParserListener) EnterElseIfExpr(ctx *ElseIfExprContext) {}
+
+// ExitElseIfExpr is called when the 'elseIfExpr' production is exited.
+func (s *BaseEarthParserListener) ExitElseIfExpr(ctx *ElseIfExprContext) {}
+
+// EnterTryStmt is called when the 'tryStmt' production is entered.
+func (s *BaseEarthParserListener) EnterTryStmt(ctx *TryStmtContext) {}
+
+// ExitTryStmt is called when the 'tryStmt' production is exited.
+func (s *BaseEarthParserListener) ExitTryStmt(ctx *TryStmtContext) {}
+
+// EnterTryClause is called when the 'tryClause' production is entered.
+func (s *BaseEarthParserListener) EnterTryClause(ctx *TryClauseContext) {}
+
+// ExitTryClause is called when the 'tryClause' production is exited.
+func (s *BaseEarthParserListener) ExitTryClause(ctx *TryClauseContext) {}
+
+// EnterTryBlock is called when the 'tryBlock' production is entered.
+func (s *BaseEarthParserListener) EnterTryBlock(ctx *TryBlockContext) {}
+
+// ExitTryBlock is called when the 'tryBlock' production is exited.
+func (s *BaseEarthParserListener) ExitTryBlock(ctx *TryBlockContext) {}
+
+// EnterCatchClause is called when the 'catchClause' production is entered.
+func (s *BaseEarthParserListener) EnterCatchClause(ctx *CatchClauseContext) {}
+
+// ExitCatchClause is called when the 'catchClause' production is exited.
+func (s *BaseEarthParserListener) ExitCatchClause(ctx *CatchClauseContext) {}
+
+// EnterCatchBlock is called when the 'catchBlock' production is entered.
+func (s *BaseEarthParserListener) EnterCatchBlock(ctx *CatchBlockContext) {}
+
+// ExitCatchBlock is called when the 'catchBlock' production is exited.
+func (s *BaseEarthParserListener) ExitCatchBlock(ctx *CatchBlockContext) {}
+
+// EnterFinallyClause is called when the 'finallyClause' production is entered.
+func (s *BaseEarthParserListener) EnterFinallyClause(ctx *FinallyClauseContext) {}
+
+// ExitFinallyClause is called when the 'finallyClause' production is exited.
+func (s *BaseEarthParserListener) ExitFinallyClause(ctx *FinallyClauseContext) {}
+
+// EnterFinallyBlock is called when the 'finallyBlock' production is entered.
+func (s *BaseEarthParserListener) EnterFinallyBlock(ctx *FinallyBlockContext) {}
+
+// ExitFinallyBlock is called when the 'finallyBlock' production is exited.
+func (s *BaseEarthParserListener) ExitFinallyBlock(ctx *FinallyBlockContext) {}
+
+// EnterForStmt is called when the 'forStmt' production is entered.
+func (s *BaseEarthParserListener) EnterForStmt(ctx *ForStmtContext) {}
+
+// ExitForStmt is called when the 'forStmt' production is exited.
+func (s *BaseEarthParserListener) ExitForStmt(ctx *ForStmtContext) {}
+
+// EnterForClause is called when the 'forClause' production is entered.
+func (s *BaseEarthParserListener) EnterForClause(ctx *ForClauseContext) {}
+
+// ExitForClause is called when the 'forClause' production is exited.
+func (s *BaseEarthParserListener) ExitForClause(ctx *ForClauseContext) {}
+
+// EnterForBlock is called when the 'forBlock' production is entered.
+func (s *BaseEarthParserListener) EnterForBlock(ctx *ForBlockContext) {}
+
+// ExitForBlock is called when the 'forBlock' production is exited.
+func (s *BaseEarthParserListener) ExitForBlock(ctx *ForBlockContext) {}
+
+// EnterForExpr is called when the 'forExpr' production is entered.
+func (s *BaseEarthParserListener) EnterForExpr(ctx *ForExprContext) {}
+
+// ExitForExpr is called when the 'forExpr' production is exited.
+func (s *BaseEarthParserListener) ExitForExpr(ctx *ForExprContext) {}
+
+// EnterWaitStmt is called when the 'waitStmt' production is entered.
+func (s *BaseEarthParserListener) EnterWaitStmt(ctx *WaitStmtContext) {}
+
+// ExitWaitStmt is called when the 'waitStmt' production is exited.
+func (s *BaseEarthParserListener) ExitWaitStmt(ctx *WaitStmtContext) {}
+
+// EnterWaitClause is called when the 'waitClause' production is entered.
+func (s *BaseEarthParserListener) EnterWaitClause(ctx *WaitClauseContext) {}
+
+// ExitWaitClause is called when the 'waitClause' production is exited.
+func (s *BaseEarthParserListener) ExitWaitClause(ctx *WaitClauseContext) {}
+
+// EnterWaitBlock is called when the 'waitBlock' production is entered.
+func (s *BaseEarthParserListener) EnterWaitBlock(ctx *WaitBlockContext) {}
+
+// ExitWaitBlock is called when the 'waitBlock' production is exited.
+func (s *BaseEarthParserListener) ExitWaitBlock(ctx *WaitBlockContext) {}
+
+// EnterWaitExpr is called when the 'waitExpr' production is entered.
+func (s *BaseEarthParserListener) EnterWaitExpr(ctx *WaitExprContext) {}
+
+// ExitWaitExpr is called when the 'waitExpr' production is exited.
+func (s *BaseEarthParserListener) ExitWaitExpr(ctx *WaitExprContext) {}
+
+// EnterFromStmt is called when the 'fromStmt' production is entered.
+func (s *BaseEarthParserListener) EnterFromStmt(ctx *FromStmtContext) {}
+
+// ExitFromStmt is called when the 'fromStmt' production is exited.
+func (s *BaseEarthParserListener) ExitFromStmt(ctx *FromStmtContext) {}
+
+// EnterFromDockerfileStmt is called when the 'fromDockerfileStmt' production is entered.
+func (s *BaseEarthParserListener) EnterFromDockerfileStmt(ctx *FromDockerfileStmtContext) {}
+
+// ExitFromDockerfileStmt is called when the 'fromDockerfileStmt' production is exited.
+func (s *BaseEarthParserListener) ExitFromDockerfileStmt(ctx *FromDockerfileStmtContext) {}
+
+// EnterLocallyStmt is called when the 'locallyStmt' production is entered.
+func (s *BaseEarthParserListener) EnterLocallyStmt(ctx *LocallyStmtContext) {}
+
+// ExitLocallyStmt is called when the 'locallyStmt' production is exited.
+func (s *BaseEarthParserListener) ExitLocallyStmt(ctx *LocallyStmtContext) {}
+
+// EnterCopyStmt is called when the 'copyStmt' production is entered.
+func (s *BaseEarthParserListener) EnterCopyStmt(ctx *CopyStmtContext) {}
+
+// ExitCopyStmt is called when the 'copyStmt' production is exited.
+func (s *BaseEarthParserListener) ExitCopyStmt(ctx *CopyStmtContext) {}
+
+// EnterSaveStmt is called when the 'saveStmt' production is entered.
+func (s *BaseEarthParserListener) EnterSaveStmt(ctx *SaveStmtContext) {}
+
+// ExitSaveStmt is called when the 'saveStmt' production is exited.
+func (s *BaseEarthParserListener) ExitSaveStmt(ctx *SaveStmtContext) {}
+
+// EnterSaveImage is called when the 'saveImage' production is entered.
+func (s *BaseEarthParserListener) EnterSaveImage(ctx *SaveImageContext) {}
+
+// ExitSaveImage is called when the 'saveImage' production is exited.
+func (s *BaseEarthParserListener) ExitSaveImage(ctx *SaveImageContext) {}
+
+// EnterSaveArtifact is called when the 'saveArtifact' production is entered.
+func (s *BaseEarthParserListener) EnterSaveArtifact(ctx *SaveArtifactContext) {}
+
+// ExitSaveArtifact is called when the 'saveArtifact' production is exited.
+func (s *BaseEarthParserListener) ExitSaveArtifact(ctx *SaveArtifactContext) {}
+
+// EnterRunStmt is called when the 'runStmt' production is entered.
+func (s *BaseEarthParserListener) EnterRunStmt(ctx *RunStmtContext) {}
+
+// ExitRunStmt is called when the 'runStmt' production is exited.
+func (s *BaseEarthParserListener) ExitRunStmt(ctx *RunStmtContext) {}
+
+// EnterBuildStmt is called when the 'buildStmt' production is entered.
+func (s *BaseEarthParserListener) EnterBuildStmt(ctx *BuildStmtContext) {}
+
+// ExitBuildStmt is called when the 'buildStmt' production is exited.
+func (s *BaseEarthParserListener) ExitBuildStmt(ctx *BuildStmtContext) {}
+
+// EnterWorkdirStmt is called when the 'workdirStmt' production is entered.
+func (s *BaseEarthParserListener) EnterWorkdirStmt(ctx *WorkdirStmtContext) {}
+
+// ExitWorkdirStmt is called when the 'workdirStmt' production is exited.
+func (s *BaseEarthParserListener) ExitWorkdirStmt(ctx *WorkdirStmtContext) {}
+
+// EnterUserStmt is called when the 'userStmt' production is entered.
+func (s *BaseEarthParserListener) EnterUserStmt(ctx *UserStmtContext) {}
+
+// ExitUserStmt is called when the 'userStmt' production is exited.
+func (s *BaseEarthParserListener) ExitUserStmt(ctx *UserStmtContext) {}
+
+// EnterCmdStmt is called when the 'cmdStmt' production is entered.
+func (s *BaseEarthParserListener) EnterCmdStmt(ctx *CmdStmtContext) {}
+
+// ExitCmdStmt is called when the 'cmdStmt' production is exited.
+func (s *BaseEarthParserListener) ExitCmdStmt(ctx *CmdStmtContext) {}
+
+// EnterEntrypointStmt is called when the 'entrypointStmt' production is entered.
+func (s *BaseEarthParserListener) EnterEntrypointStmt(ctx *EntrypointStmtContext) {}
+
+// ExitEntrypointStmt
+
+---
+/Users/adam/sandbox/earthly/ast/parser/EarthLexer.g4
+---
+This file defines a lexer grammar for a custom language, likely used for scripting or configuration, such as a build script or deployment configuration. The lexer specifies tokens, channels, and modes to handle different parts of the language syntax, including commands, arguments, and control structures.
+
+```antlr
+lexer grammar EarthLexer;
+
+// Tokens represent the basic building blocks of the language.
+tokens {
+    INDENT,
+    DEDENT
+}
+
+// Channels allow categorizing tokens, such as separating whitespace and comments from meaningful syntax.
+channels {
+    WHITESPACE_CHANNEL,
+    COMMENTS_CHANNEL
+}
+
+// Main lexer rules defining the syntax for targets, commands, and functions.
+Target: [a-z] ([a-zA-Z0-9.] | '-')* ':' -> pushMode(RECIPE);
+UserCommand: [A-Z] ([A-Z0-9._])* ':' -> pushMode(RECIPE);
+Function: [A-Z] ([A-Z0-9._])* ':' -> pushMode(RECIPE);
+
+// Commands that change the lexer mode to handle arguments differently.
+FROM: 'FROM' -> pushMode(COMMAND_ARGS);
+FROM_DOCKERFILE: 'FROM DOCKERFILE' -> pushMode(COMMAND_ARGS);
+LOCALLY: 'LOCALLY' -> pushMode(COMMAND_ARGS);
+COPY: 'COPY' -> pushMode(COMMAND_ARGS);
+SAVE_ARTIFACT: 'SAVE ARTIFACT' -> pushMode(COMMAND_ARGS);
+SAVE_IMAGE: 'SAVE IMAGE' -> pushMode(COMMAND_ARGS);
+RUN: 'RUN' -> pushMode(COMMAND_ARGS);
+EXPOSE: 'EXPOSE' -> pushMode(COMMAND_ARGS);
+VOLUME: 'VOLUME' -> pushMode(COMMAND_ARGS);
+ENV: 'ENV' -> pushMode(COMMAND_ARGS_KEY_VALUE);
+ARG: 'ARG' -> pushMode(COMMAND_ARGS_KEY_VALUE);
+SET: 'SET' -> pushMode(COMMAND_ARGS_KEY_VALUE);
+LET: 'LET' -> pushMode(COMMAND_ARGS_KEY_VALUE);
+LABEL: 'LABEL' -> pushMode(COMMAND_ARGS_KEY_VALUE_LABEL);
+BUILD: 'BUILD' -> pushMode(COMMAND_ARGS);
+WORKDIR: 'WORKDIR' -> pushMode(COMMAND_ARGS);
+USER: 'USER' -> pushMode(COMMAND_ARGS);
+CMD: 'CMD' -> pushMode(COMMAND_ARGS);
+ENTRYPOINT: 'ENTRYPOINT' -> pushMode(COMMAND_ARGS);
+GIT_CLONE: 'GIT CLONE' -> pushMode(COMMAND_ARGS);
+ADD: 'ADD' -> pushMode(COMMAND_ARGS);
+STOPSIGNAL: 'STOPSIGNAL' -> pushMode(COMMAND_ARGS);
+ONBUILD: 'ONBUILD' -> pushMode(COMMAND_ARGS);
+HEALTHCHECK: 'HEALTHCHECK' -> pushMode(COMMAND_ARGS);
+SHELL: 'SHELL' -> pushMode(COMMAND_ARGS);
+DO: 'DO' -> pushMode(COMMAND_ARGS);
+COMMAND: 'COMMAND' -> pushMode(COMMAND_ARGS);
+FUNCTION: 'FUNCTION' -> pushMode(COMMAND_ARGS);
+IMPORT: 'IMPORT' -> pushMode(COMMAND_ARGS);
+VERSION: 'VERSION' -> pushMode(COMMAND_ARGS);
+CACHE: 'CACHE' -> pushMode(COMMAND_ARGS);
+HOST: 'HOST' -> pushMode(COMMAND_ARGS);
+PROJECT: 'PROJECT' -> pushMode(COMMAND_ARGS);
+
+// Control structures that also change lexer modes.
+WITH: 'WITH';
+DOCKER: 'DOCKER' -> pushMode(BLOCK), pushMode(COMMAND_ARGS);
+IF: 'IF' -> pushMode(BLOCK), pushMode(COMMAND_ARGS);
+TRY: 'TRY' -> pushMode(BLOCK), pushMode(COMMAND_ARGS);
+FOR: 'FOR' -> pushMode(BLOCK), pushMode(COMMAND_ARGS);
+WAIT: 'WAIT' -> pushMode(BLOCK), pushMode(COMMAND_ARGS);
+
+// Handling of newlines, whitespace, and comments.
+NL: [ \t]* (EOF | CRLF);
+WS: [ \t] ([ \t] | LC)* -> channel(WHITESPACE_CHANNEL);
+COMMENT: [ \t]* '#' (~[\r\n])* -> channel(COMMENTS_CHANNEL);
+fragment CRLF: ('\r' | '\n' | '\r\n');
+
+// Additional modes for handling specific syntax structures in recipes and blocks.
+mode RECIPE;
+mode BLOCK;
+mode COMMAND_ARGS;
+mode COMMAND_ARGS_KEY_VALUE;
+mode COMMAND_ARGS_KEY_VALUE_ASSIGNMENT;
+mode COMMAND_ARGS_KEY_VALUE_LABEL;
+```
+
+This lexer grammar is structured to handle a variety of commands and control structures, managing different contexts with lexer modes to correctly parse and interpret the input script. Each mode is tailored to handle specific parts of the language, ensuring that tokens are recognized and categorized appropriately for further processing.
+
+---
+/Users/adam/sandbox/earthly/ast/parser/earth_lexer.go
+---
+```go
+// Code generated from ast/parser/EarthLexer.g4 by ANTLR 4.12.0. DO NOT EDIT.
+
+package parser
+
+// EarthLexer is a lexer for Earthly build files, generated by ANTLR.
+type EarthLexer struct {
+	*antlr.BaseLexer
+	channelNames []string
+	modeNames    []string
+}
+
+// NewEarthLexer produces a new lexer instance for the optional input antlr.CharStream.
+func NewEarthLexer(input antlr.CharStream) *EarthLexer { ... }
+
+// EarthLexer tokens.
+const (
+	EarthLexerINDENT = 1
+	EarthLexerDEDENT = 2
+	EarthLexerTarget = 3
+	EarthLexerUserCommand = 4
+	EarthLexerFunction = 5
+	EarthLexerFROM = 6
+	EarthLexerFROM_DOCKERFILE = 7
+	EarthLexerLOCALLY = 8
+	EarthLexerCOPY = 9
+	EarthLexerSAVE_ARTIFACT = 10
+	EarthLexerSAVE_IMAGE = 11
+	EarthLexerRUN = 12
+	EarthLexerEXPOSE = 13
+	EarthLexerVOLUME = 14
+	EarthLexerENV = 15
+	EarthLexerARG = 16
+	EarthLexerSET = 17
+	EarthLexerLET = 18
+	EarthLexerLABEL = 19
+	EarthLexerBUILD = 20
+	EarthLexerWORKDIR = 21
+	EarthLexerUSER = 22
+	EarthLexerCMD = 23
+	EarthLexerENTRYPOINT = 24
+	EarthLexerGIT_CLONE = 25
+	EarthLexerADD = 26
+	EarthLexerSTOPSIGNAL = 27
+	EarthLexerONBUILD = 28
+	EarthLexerHEALTHCHECK = 29
+	EarthLexerSHELL = 30
+	EarthLexerDO = 31
+	EarthLexerCOMMAND = 32
+	EarthLexerFUNCTION = 33
+	EarthLexerIMPORT = 34
+	EarthLexerVERSION = 35
+	EarthLexerCACHE = 36
+	EarthLexerHOST = 37
+	EarthLexerPROJECT = 38
+	EarthLexerWITH = 39
+	EarthLexerDOCKER = 40
+	EarthLexerIF = 41
+	EarthLexerTRY = 42
+	EarthLexerFOR = 43
+	EarthLexerWAIT = 44
+	EarthLexerNL = 45
+	EarthLexerWS = 46
+	EarthLexerCOMMENT = 47
+	EarthLexerELSE = 48
+	EarthLexerELSE_IF = 49
+	EarthLexerCATCH = 50
+	EarthLexerFINALLY = 51
+	EarthLexerEND = 52
+	EarthLexerAtom = 53
+	EarthLexerEQUALS = 54
+)
+
+// EarthLexer escapedChannels.
+const (
+	EarthLexerWHITESPACE_CHANNEL = 2
+	EarthLexerCOMMENTS_CHANNEL = 3
+)
+
+// EarthLexer modes.
+const (
+	EarthLexerRECIPE = iota + 1
+	EarthLexerBLOCK
+	EarthLexerCOMMAND_ARGS
+	EarthLexerCOMMAND_ARGS_KEY_VALUE
+	EarthLexerCOMMAND_ARGS_KEY_VALUE_ASSIGNMENT
+	EarthLexerCOMMAND_ARGS_KEY_VALUE_LABEL
+)
+```
+
+---
+/Users/adam/sandbox/earthly/ast/parser/export.go
+---
+package parser
+
+// This file provides functions to retrieve lexer configurations such as mode names, symbolic names, and literal names for tokens.
+
+// GetLexerModeNames returns the generated mode names used by the lexer.
+func GetLexerModeNames() []string { ... }
+
+// GetLexerSymbolicNames returns the generated symbolic names for tokens.
+func GetLexerSymbolicNames() []string { ... }
+
+// GetLexerLiteralNames returns the generated literal names for tokens.
+func GetLexerLiteralNames() []string { ... }
+
+---
+/Users/adam/sandbox/earthly/ast/parser/earthparser_listener.go
+---
+// Code generated from ast/parser/EarthParser.g4 by ANTLR 4.12.0. DO NOT EDIT.
+
+package parser // EarthParser
+
+// EarthParserListener is a complete listener for a parse tree produced by EarthParser.
+type EarthParserListener interface {
+	antlr.ParseTreeListener
+
+	// EnterEarthFile is called when entering the earthFile production.
+	EnterEarthFile(c *EarthFileContext)
+
+	// EnterTargets is called when entering the targets production.
+	EnterTargets(c *TargetsContext)
+
+	// EnterTargetOrUserCommand is called when entering the targetOrUserCommand production.
+	EnterTargetOrUserCommand(c *TargetOrUserCommandContext)
+
+	// EnterTarget is called when entering the target production.
+	EnterTarget(c *TargetContext)
+
+	// EnterTargetHeader is called when entering the targetHeader production.
+	EnterTargetHeader(c *TargetHeaderContext)
+
+	// EnterUserCommand is called when entering the userCommand production.
+	EnterUserCommand(c *UserCommandContext)
+
+	// EnterUserCommandHeader is called when entering the userCommandHeader production.
+	EnterUserCommandHeader(c *UserCommandHeaderContext)
+
+	// EnterFunction is called when entering the function production.
+	EnterFunction(c *FunctionContext)
+
+	// EnterFunctionHeader is called when entering the functionHeader production.
+	EnterFunctionHeader(c *FunctionHeaderContext)
+
+	// EnterStmts is called when entering the stmts production.
+	EnterStmts(c *StmtsContext)
+
+	// EnterStmt is called when entering the stmt production.
+	EnterStmt(c *StmtContext)
+
+	// EnterCommandStmt is called when entering the commandStmt production.
+	EnterCommandStmt(c *CommandStmtContext)
+
+	// EnterVersion is called when entering the version production.
+	EnterVersion(c *VersionContext)
+
+	// EnterWithStmt is called when entering the withStmt production.
+	EnterWithStmt(c *WithStmtContext)
+
+	// EnterWithBlock is called when entering the withBlock production.
+	EnterWithBlock(c *WithBlockContext)
+
+	// EnterWithExpr is called when entering the withExpr production.
+	EnterWithExpr(c *WithExprContext)
+
+	// EnterWithCommand is called when entering the withCommand production.
+	EnterWithCommand(c *WithCommandContext)
+
+	// EnterDockerCommand is called when entering the dockerCommand production.
+	EnterDockerCommand(c *DockerCommandContext)
+
+	// EnterIfStmt is called when entering the ifStmt production.
+	EnterIfStmt(c *IfStmtContext)
+
+	// EnterIfClause is called when entering the ifClause production.
+	EnterIfClause(c *IfClauseContext)
+
+	// EnterIfBlock is called when entering the ifBlock production.
+	EnterIfBlock(c *IfBlockContext)
+
+	// EnterElseIfClause is called when entering the elseIfClause production.
+	EnterElseIfClause(c *ElseIfClauseContext)
+
+	// EnterElseIfBlock is called when entering the elseIfBlock production.
+	EnterElseIfBlock(c *ElseIfBlockContext)
+
+	// EnterElseClause is called when entering the elseClause production.
+	EnterElseClause(c *ElseClauseContext)
+
+	// EnterElseBlock is called when entering the elseBlock production.
+	EnterElseBlock(c *ElseBlockContext)
+
+	// EnterIfExpr is called when entering the ifExpr production.
+	EnterIfExpr(c *IfExprContext)
+
+	// EnterElseIfExpr is called when entering the elseIfExpr production.
+	EnterElseIfExpr(c *ElseIfExprContext)
+
+	// EnterTryStmt is called when entering the tryStmt production.
+	EnterTryStmt(c *TryStmtContext)
+
+	// EnterTryClause is called when entering the tryClause production.
+	EnterTryClause(c *TryClauseContext)
+
+	// EnterTryBlock is called when entering the tryBlock production.
+	EnterTryBlock(c *TryBlockContext)
+
+	// EnterCatchClause is called when entering the catchClause production.
+	EnterCatchClause(c *CatchClauseContext)
+
+	// EnterCatchBlock is called when entering the catchBlock production.
+	EnterCatchBlock(c *CatchBlockContext)
+
+	// EnterFinallyClause is called when entering the finallyClause production.
+	EnterFinallyClause(c *FinallyClauseContext)
+
+	// EnterFinallyBlock is called when entering the finallyBlock production.
+	EnterFinallyBlock(c *FinallyBlockContext)
+
+	// EnterForStmt is called when entering the forStmt production.
+	EnterForStmt(c *ForStmtContext)
+
+	// EnterForClause is called when entering the forClause production.
+	EnterForClause(c *ForClauseContext)
+
+	// EnterForBlock is called when entering the forBlock production.
+	EnterForBlock(c *ForBlockContext)
+
+	// EnterForExpr is called when entering the forExpr production.
+	EnterForExpr(c *ForExprContext)
+
+	// EnterWaitStmt is called when entering the waitStmt production.
+	EnterWaitStmt(c *WaitStmtContext)
+
+	// EnterWaitClause is called when entering the waitClause production.
+	EnterWaitClause(c *WaitClauseContext)
+
+	// EnterWaitBlock is called when entering the waitBlock production.
+	EnterWaitBlock(c *WaitBlockContext)
+
+	// EnterWaitExpr is called when entering the waitExpr production.
+	EnterWaitExpr(c *WaitExprContext)
+
+	// EnterFromStmt is called when entering the fromStmt production.
+	EnterFromStmt(c *FromStmtContext)
+
+	// EnterFromDockerfileStmt is called when entering the fromDockerfileStmt production.
+	EnterFromDockerfileStmt(c *FromDockerfileStmtContext)
+
+	// EnterLocallyStmt is called when entering the locallyStmt production.
+	EnterLocallyStmt(c *LocallyStmtContext)
+
+	// EnterCopyStmt is called when entering the copyStmt production.
+	EnterCopyStmt(c *CopyStmtContext)
+
+	// EnterSaveStmt is called when entering the saveStmt production.
+	EnterSaveStmt(c *SaveStmtContext)
+
+	// EnterSaveImage is called when entering the saveImage production.
+	EnterSaveImage(c *SaveImageContext)
+
+	// EnterSaveArtifact is called when entering the saveArtifact production.
+	EnterSaveArtifact(c *SaveArtifactContext)
+
+	// EnterRunStmt is called when entering the runStmt production.
+	EnterRunStmt(c *RunStmtContext)
+
+	// EnterBuildStmt is called when entering the buildStmt production.
+	EnterBuildStmt(c *BuildStmtContext)
+
+	// EnterWorkdirStmt is called when entering the workdirStmt production.
+	EnterWorkdirStmt(c *WorkdirStmtContext)
+
+	// EnterUserStmt is called when entering the userStmt production.
+	EnterUserStmt(c *UserStmtContext)
+
+	// EnterCmdStmt is called when entering the cmdStmt production.
+	EnterCmdStmt(c *CmdStmtContext)
+
+	// EnterEntrypointStmt is called when entering the entrypointStmt production.
+	EnterEntrypointStmt(c *EntrypointStmtContext)
+
+	// EnterExposeStmt is called when entering the exposeStmt production.
+	EnterExposeStmt(c *ExposeStmtContext)
+
+	// EnterVolumeStmt is called when entering the volumeStmt production.
+	EnterVolumeStmt(c *VolumeStmtContext)
+
+	// EnterEnvStmt is called when entering the envStmt production.
+	EnterEnvStmt(c *EnvStmtContext)
+
+	// EnterArgStmt is called when entering the argStmt production.
+	EnterArgStmt(c *ArgStmtContext)
+
+	// EnterSetStmt is called when entering the setStmt production.
+	EnterSetStmt(c *SetStmtContext)
+
+	// EnterLetStmt is called when entering the letStmt production.
+	EnterLetStmt(c *LetStmtContext)
+
+	// EnterOptionalFlag is called when entering the optionalFlag production.
+	EnterOptionalFlag(c *OptionalFlagContext)
+
+	// EnterEnvArgKey is called when entering the envArgKey production.
+	EnterEnvArgKey(c *EnvArgKeyContext)
+
+	// EnterEnvArgValue is called when entering the envArgValue production.
+	EnterEnvArgValue(c *EnvArgValueContext)
+
+	// EnterLabelStmt is called when entering the labelStmt production.
+	EnterLabelStmt(c *LabelStmtContext)
+
+	// EnterLabelKey is called when entering the labelKey production.
+	EnterLabelKey(c *LabelKeyContext)
+
+	// EnterLabelValue is called when entering the labelValue production.
+	EnterLabelValue(c *LabelValueContext)
+
+	// EnterGitCloneStmt is called when entering the gitCloneStmt production.
+	EnterGitCloneStmt(c *GitCloneStmtContext)
+
+	// EnterAddStmt is called when entering the addStmt production.
+	EnterAddStmt(c *AddStmtContext)
+
+	// EnterStopsignalStmt is called when entering the stopsignalStmt production.
+	EnterStopsignalStmt(c *StopsignalStmtContext)
+
+	// EnterOnbuildStmt is called when entering the onbuildStmt production.
+	EnterOnbuildStmt(c *OnbuildStmtContext)
+
+	// EnterHealthcheckStmt is called when entering the healthcheckStmt production.
+	EnterHealthcheckStmt(c *HealthcheckStmtContext)
+
+	// EnterShellStmt is called when entering the shellStmt production.
+	EnterShellStmt(c *ShellStmtContext)
+
+	// EnterUserCommandStmt is called when entering the userCommandStmt production.
+	EnterUserCommandStmt(c *UserCommandStmtContext)
+
+	// EnterFunctionStmt is called when entering the functionStmt production.
+	EnterFunctionStmt(c *FunctionStmtContext)
+
+	// EnterDoStmt is called when entering the doStmt production.
+	EnterDoStmt(c *DoStmtContext)
+
+	// EnterImportStmt is called when entering the importStmt production.
+	EnterImportStmt(c *ImportStmtContext)
+
+	// EnterCacheStmt is called when entering the cacheStmt production.
+	EnterCacheStmt(c *CacheStmtContext)
+
+	// EnterHostStmt is called when entering the hostStmt production.
+	EnterHostStmt(c *HostStmtContext)
+
+	// EnterProjectStmt is called when entering the projectStmt production.
+	EnterProjectStmt(c *ProjectStmtContext)
+
+	// EnterExpr is called when entering the expr production.
+	EnterExpr(c *ExprContext)
+
+	// EnterStmtWordsMaybeJSON is called when entering the stmtWordsMaybeJSON production.
+	EnterStmtWordsMaybeJSON(c *StmtWordsMaybeJSONContext)
+
+	// EnterStmtWords is called when entering the stmtWords production.
+	EnterStmtWords(c *StmtWordsContext)
+
+	// EnterStmtWord is called when entering the stmtWord production.
+	EnterStmtWord(c *StmtWordContext)
+}
+
+---
+/Users/adam/sandbox/earthly/ast/parser/earth_parser.go
+---
+The provided Go code defines a parser for a specific language or format, focusing on parsing and interpreting various commands and statements. It includes a variety of functions and types that handle different aspects of parsing, such as handling different types of statements (e.g., `FROM`, `RUN`, `COPY`), managing configurations, and interpreting user commands. The code is structured to support customization through options and to handle errors gracefully during the parsing process.
+
+---
+/Users/adam/sandbox/earthly/ast/parser/EarthParser.g4
+---
+// This file defines the grammar for the EarthParser, which is used to parse Earthly build files. The grammar includes definitions for various statements and commands that can be used within an Earthly build file.
+
+// The main structure of an Earthly build file.
+earthFile: NL* version? (stmts NL)? NL* targets? NL* EOF;
+
+// Defines targets and user commands.
+targets: targetOrUserCommand (NL* targetOrUserCommand)*;
+targetOrUserCommand: target | userCommand;
+target: targetHeader NL+ (INDENT NL* stmts? NL+ DEDENT)?;
+targetHeader: Target;
+userCommand: userCommandHeader NL+ (INDENT NL* stmts NL+ DEDENT)?;
+userCommandHeader: UserCommand;
+function: functionHeader NL+ (INDENT NL* stmts NL+ DEDENT)?;
+functionHeader: Function;
+
+// Statements within a target or command.
+stmts: stmt (NL+ stmt)*;
+
+// Different types of statements.
+stmt:
+	commandStmt
+	| withStmt
+	| ifStmt
+	| forStmt
+	| waitStmt
+	| tryStmt;
+
+// Command statements include various build commands.
+commandStmt:
+	fromStmt
+	| fromDockerfileStmt
+	| locallyStmt
+	| copyStmt
+	| saveStmt
+	| runStmt
+	| buildStmt
+	| workdirStmt
+	| userStmt
+	| cmdStmt
+	| entrypointStmt
+	| exposeStmt
+	| volumeStmt
+	| envStmt
+	| argStmt
+	| setStmt
+	| letStmt
+	| labelStmt
+	| gitCloneStmt
+	| addStmt
+	| stopsignalStmt
+	| onbuildStmt
+	| healthcheckStmt
+	| shellStmt
+	| userCommandStmt
+	| functionStmt
+	| doStmt
+	| importStmt
+	| cacheStmt
+	| hostStmt
+	| projectStmt;
+
+// Version statement.
+version: VERSION stmtWords NL+;
+
+// With statement for scoping.
+withStmt: withExpr (NL+ withBlock)? NL+ END;
+withBlock: stmts;
+withExpr: WITH withCommand;
+withCommand: dockerCommand;
+dockerCommand: DOCKER stmtWords?;
+
+// If statement for conditional execution.
+ifStmt: ifClause (NL+ elseIfClause)* (NL+ elseClause)? NL+ END;
+ifClause: IF ifExpr (NL+ ifBlock)?;
+ifBlock: stmts;
+elseIfClause: ELSE_IF elseIfExpr (NL+ elseIfBlock)?;
+elseIfBlock: stmts;
+elseClause: ELSE (NL+ elseBlock)?;
+elseBlock: stmts;
+ifExpr: expr;
+elseIfExpr: expr;
+
+// Try statement for error handling.
+tryStmt: tryClause (NL+ catchClause)? (NL+ finallyClause)? NL+ END;
+tryClause: TRY (NL+ tryBlock)?;
+tryBlock: stmts;
+catchClause: CATCH (NL+ catchBlock)?;
+catchBlock: stmts;
+finallyClause: FINALLY (NL+ finallyBlock)?;
+finallyBlock: stmts;
+
+// For statement for loops.
+forStmt: forClause NL+ END;
+forClause: FOR forExpr (NL+ forBlock)?;
+forBlock: stmts;
+forExpr: stmtWords;
+
+// Wait statement for synchronization.
+waitStmt: waitClause NL+ END;
+waitClause: WAIT waitExpr? (NL+ waitBlock)?;
+waitBlock: stmts;
+waitExpr: stmtWords;
+
+// Expressions and statement words.
+expr: stmtWordsMaybeJSON;
+stmtWordsMaybeJSON: stmtWords;
+stmtWords: stmtWord+;
+stmtWord: Atom;
+
+---
+/Users/adam/sandbox/earthly/ast/antlrhandler/error_listener.go
+---
+package antlrhandler
+
+// Handles syntax errors during parsing by collecting and returning them, enhancing error messages with human-readable hints.
+
+// ReturnErrorListener collects errors during parsing and provides enhanced error reporting.
+type ReturnErrorListener struct {
+	*antlr.DefaultErrorListener
+	Errs []error  // List of errors encountered during parsing.
+}
+
+// NewReturnErrorListener creates a new instance of ReturnErrorListener.
+func NewReturnErrorListener() *ReturnErrorListener { ... }
+
+// SyntaxError is triggered on encountering a syntax error during parsing, enhancing the error message with additional context and hints.
+func (rel *ReturnErrorListener) SyntaxError(recognizer antlr.Recognizer, offendingSymbol interface{}, line, column int, msg string, e antlr.RecognitionException) { ... }
+
+---
+/Users/adam/sandbox/earthly/ast/antlrhandler/error_strategy.go
+---
+package antlrhandler
+
+// Provides a custom error handling strategy for ANTLR parsers, allowing errors to be captured and returned rather than causing immediate failure.
+
+// Custom error strategy for ANTLR parsing that captures errors for later handling.
+type ReturnErrorStrategy struct {
+	*antlr.DefaultErrorStrategy
+	Err        error
+	Hint       string
+	ErrContext antlr.ParserRuleContext
+	RE         antlr.RecognitionException
+
+	litNames, symbNames []string
+}
+
+// Creates a new ReturnErrorStrategy with specified literal and symbol names for better error messages.
+func NewReturnErrorStrategy(litNames, symbNames []string) *ReturnErrorStrategy { ... }
+
+// Attempts to recover from a parsing error, capturing the error details for later use.
+func (res *ReturnErrorStrategy) Recover(recognizer antlr.Parser, e antlr.RecognitionException) { ... }
+
+// Attempts to recover from a parsing error inline, capturing the error details and continuing parsing.
+func (res *ReturnErrorStrategy) RecoverInline(recognizer antlr.Parser) antlr.Token { ... }
+
+// Ensures the parser state is synchronized after an error, but does not alter the error handling behavior.
+func (res *ReturnErrorStrategy) Sync(recognizer antlr.Parser) { ... }
+
+---
+/Users/adam/sandbox/earthly/ast/command/types.go
+---
+package command
+
+// Defines command types for a command processing system, such as a build system or script interpreter. Each constant represents a unique command type.
+
+// Enumerated type for command identifiers.
+type Type int
+
+const (
+	AddCmd            Type = iota + 1 // Represents an "ADD" command.
+	ArgCmd                            // Represents an "ARG" command.
+	BuildCmd                          // Represents a "BUILD" command.
+	CacheCmd                          // Represents a "CACHE" command.
+	CmdCmd                            // Represents a "CMD" command.
+	CommandCmd                        // Represents a "COMMAND" command.
+	CopyCmd                           // Represents a "COPY" command.
+	DoCmd                             // Represents a "DO" command.
+	DockerCmd                         // Represents a "DOCKER" command.
+	EnterScopeDoCmd                   // Represents an "ENTER-SCOPE-DO" command.
+	EntrypointCmd                     // Represents an "ENTRYPOINT" command.
+	EnvCmd                            // Represents an "ENV" command.
+	ExposeCmd                         // Represents an "EXPOSE" command.
+	FromCmd                           // Represents a "FROM" command.
+	FromDockerfileCmd                 // Represents a "FROM DOCKERFILE" command.
+	GitCloneCmd                       // Represents a "GIT CLONE" command.
+	HealthcheckCmd                    // Represents a "HEALTHCHECK" command.
+	HostCmd                           // Represents a "HOST" command.
+	ImportCmd                         // Represents an "IMPORT" command.
+	LabelCmd                          // Represents a "LABEL" command.
+	LetCmd                            // Represents a "LET" command.
+	LoadCmd                           // Represents a "LOAD" command.
+	LocallyCmd                        // Represents a "LOCALLY" command.
+	OnBuildCmd                        // Represents an "ON BUILD" command.
+	ProjectCmd                        // Represents a "PROJECT" command.
+	RunCmd                            // Represents a "RUN" command.
+	SaveArtifactCmd                   // Represents a "SAVE ARTIFACT" command.
+	SaveImageCmd                      // Represents a "SAVE IMAGE" command.
+	SetCmd                            // Represents a "SET" command.
+	ShellCmd                          // Represents a "SHELL" command.
+	StopSignalCmd                     // Represents a "STOP SIGNAL" command.
+	UserCmd                           // Represents a "USER" command.
+	VolumeCmd                         // Represents a "VOLUME" command.
+	WorkdirCmd                        // Represents a "WORKDIR" command.
+	FunctionCmd                       // Represents a "FUNCTION" command.
+)
+
+---
+/Users/adam/sandbox/earthly/ast/command/names.go
+---
+package command
+
+// Defines constants representing various commands used in a Docker-like build script or configuration file. These constants are used to identify different types of operations or directives in a script.
+
+const (
+	Add            = "ADD"
+	Arg            = "ARG"
+	Build          = "BUILD"
+	Cache          = "CACHE"
+	Cmd            = "CMD"
+	Command        = "COMMAND"
+	Function       = "FUNCTION"
+	Copy           = "COPY"
+	Do             = "DO"
+	Docker         = "DOCKER"
+	Entrypoint     = "ENTRYPOINT"
+	Env            = "ENV"
+	Expose         = "EXPOSE"
+	From           = "FROM"
+	FromDockerfile = "FROM DOCKERFILE"
+	GitClone       = "GIT CLONE"
+	HealthCheck    = "HEALTHCHECK"
+	Host           = "HOST"
+	Import         = "IMPORT"
+	Label          = "LABEL"
+	Let            = "LET"
+	Load           = "LOAD"
+	Locally        = "LOCALLY"
+	OnBuild        = "ONBUILD"
+	Project        = "PROJECT"
+	Run            = "RUN"
+	SaveArtifact   = "SAVE ARTIFACT"
+	SaveImage      = "SAVE IMAGE"
+	Set            = "SET"
+	Shell          = "SHELL"
+	StopSignal     = "STOPSIGNAL"
+	User           = "USER"
+	Volume         = "VOLUME"
+	Workdir        = "WORKDIR"
+)
+
+---
+/Users/adam/sandbox/earthly/ast/command/mapping.go
+---
+package command
+
+// This file provides a mapping from command types to their string representations and a function to retrieve the string representation of a command.
+
+// CommandToString converts a command type to its string representation.
+func CommandToString(cmd Type) string { ... }
+
+---
+/Users/adam/sandbox/earthly/ast/commandflag/flags.go
+---
+package commandflag
+
+// This package defines various option structures used to configure command flags in a build system. These options control aspects like privilege levels, caching, network settings, and more, tailored for different commands like `RUN`, `COPY`, `SAVE`, etc.
+
+// Options for conditional execution based on environment settings.
+type IfOpts struct {
+	Privileged bool     `long:"privileged" description:"Enable privileged mode"`
+	WithSSH    bool     `long:"ssh" description:"Make available the SSH agent of the host"`
+	NoCache    bool     `long:"no-cache" description:"Always run this specific item, ignoring cache"`
+	Secrets    []string `long:"secret" description:"Make available a secret"`
+	Mounts     []string `long:"mount" description:"Mount a file or directory"`
+}
+
+// Options for loop-based operations, allowing customization of behavior within loops.
+type ForOpts struct {
+	Privileged bool     `long:"privileged" description:"Enable privileged mode"`
+	WithSSH    bool     `long:"ssh" description:"Make available the SSH agent of the host"`
+	NoCache    bool     `long:"no-cache" description:"Always run this specific item, ignoring cache"`
+	Secrets    []string `long:"secret" description:"Make available a secret"`
+	Mounts     []string `long:"mount" description:"Mount a file or directory"`
+	Separators string   `long:"sep" description:"The separators to use for tokenizing the output of the IN expression. Defaults to '\n\t '"`
+}
+
+// Options for running commands, including settings for network, entrypoint, and interactive modes.
+type RunOpts struct {
+	Push            bool     `long:"push" description:"Execute this command only if the build succeeds and also if earthly is invoked in push mode"`
+	Privileged      bool     `long:"privileged" description:"Enable privileged mode"`
+	WithEntrypoint  bool     `long:"entrypoint" description:"Include the entrypoint of the image when running the command"`
+	WithDocker      bool     `long:"with-docker" description:"Deprecated"`
+	WithSSH         bool     `long:"ssh" description:"Make available the SSH agent of the host"`
+	WithAWS         bool     `long:"aws" description:"Make any AWS credentials set in the environment available to RUN commands"`
+	OIDC            string   `long:"oidc" description:"make credentials from oidc provider (currently only works with AWS) available to RUN commands"`
+	NoCache         bool     `long:"no-cache" description:"Always run this specific item, ignoring cache"`
+	Interactive     bool     `long:"interactive" description:"Run this command with an interactive session, without saving changes"`
+	InteractiveKeep bool     `long:"interactive-keep" description:"Run this command with an interactive session, saving changes"`
+	Secrets         []string `long:"secret" description:"Make available a secret"`
+	Mounts          []string `long:"mount" description:"Mount a file or directory"`
+	Network         string   `long:"network" description:"Network to use; currently network=none is only supported"`
+	RawOutput       bool     `long:"raw-output" description:"Do not prefix output with target. Print Raw"`
+}
+
+// Options for specifying source configurations when using commands that involve external sources.
+type FromOpts struct {
+	AllowPrivileged bool     `long:"allow-privileged" description:"Allow commands under remote targets to enable privileged mode"`
+	PassArgs        bool     `long:"pass-args" description:"Pass arguments to external targets"`
+	BuildArgs       []string `long:"build-arg" description:"A build arg override passed on to a referenced Earthly target"`
+	Platform        string   `long:"platform" description:"The platform to use"`
+}
+
+// Options for handling Dockerfile-based operations, including target selection and argument passing.
+type FromDockerfileOpts struct {
+	AllowPrivileged bool     `long:"allow-privileged" description:"Allow command to assume privileged mode"`
+	BuildArgs       []string `long:"build-arg" description:"A build arg override passed on to a referenced Earthly target and also to the Dockerfile build"`
+	Platform        string   `long:"platform" description:"The platform to use"`
+	Target          string   `long:"target" description:"The Dockerfile target to inherit from"`
+	Path            string   `short:"f" description:"The Dockerfile location on the host, relative to the current Earthfile, or as an artifact reference"`
+}
+
+// Options for copying files and directories with specific permissions and behaviors.
+type CopyOpts struct {
+	From            string   `long:"from" description:"Not supported"`
+	IsDirCopy       bool     `long:"dir" description:"Copy entire directories, not just the contents"`
+	Chown           string   `long:"chown" description:"Apply a specific group and/or owner to the copied files and directories"`
+	Chmod           string   `long:"chmod" description:"Apply a mode to the copied files and directories"`
+	KeepTs          bool     `long:"keep-ts" description:"Keep created time file timestamps"`
+	KeepOwn         bool     `long:"keep-own" description:"Keep owner info"`
+	IfExists        bool     `long:"if-exists" description:"Do not fail if the artifact does not exist"`
+	SymlinkNoFollow bool     `long:"symlink-no-follow" description:"Do not follow symlinks"`
+	AllowPrivileged bool     `long:"allow-privileged" description:"Allow targets to assume privileged mode"`
+	PassArgs        bool     `long:"pass-args" description:"Pass arguments to external targets"`
+	Platform        string   `long:"platform" description:"The platform to use"`
+	BuildArgs       []string `long:"build-arg" description:"A build arg override passed on to a referenced Earthly target"`
+}
+
+// Options for saving artifacts with specific behaviors regarding timestamps, ownership, and symlinks.
+type SaveArtifactOpts struct {
+	KeepTs          bool `long:"keep-ts" description:"Keep created time file timestamps"`
+	KeepOwn         bool `long:"keep-own" description:"Keep owner info"`
+	IfExists        bool `long:"if-exists" description:"Do not fail if the artifact does not exist"`
+	SymlinkNoFollow bool `long:"symlink-no-follow" description:"Do not follow symlinks"`
+	Force           bool `long:"force" description:"Force artifact to be saved, even if it means overwriting files or directories outside of the relative directory"`
+}
+
+// Options for saving images with specific behaviors regarding pushing, caching, and security.
+type SaveImageOpts struct {
+	Push                 bool     `long:"push" description:"Push the image to the remote registry provided that the build succeeds and also that earthly is invoked in push mode"`
+	CacheHint            bool     `long:"cache-hint" description:"Instruct Earthly that the current target should be saved entirely as part of the remote cache"`
+	Insecure             bool     `long:"insecure" description:"Use unencrypted connection for the push"`
+	NoManifestList       bool     `long:"no-manifest-list" description:"Do not include a manifest list (specifying the platform) in the creation of the image"`
+	CacheFrom            []string `long:"cache-from" description:"Declare additional cache import as a Docker tag"`
+	WithoutEarthlyLabels bool     `long:"without-earthly-labels" description:"Disable build information dev.earthly labels to reduce the chance of changing images digests."`
+}
+
+// Options for building with specific platform and argument settings, including privilege and argument passing.
+type BuildOpts struct {
+	Platforms       []string `long:"platform" description:"The platform to use"`
+	BuildArgs       []string `long:"build-arg" description:"A build arg override passed on to a referenced Earthly target"`
+	AllowPrivileged bool     `long:"allow-privileged" description:"Allow targets to assume privileged mode"`
+	PassArgs        bool     `long:"pass-args" description:"Pass arguments to external targets"`
+	AutoSkip        bool     `long:"auto-skip" description:"Use auto-skip to bypass the target if nothing has changed"`
+}
+
+// Options for cloning a git repository with specific branch and timestamp settings.
+type GitCloneOpts struct {
+	Branch string `long:"branch" description:"The git ref to use when cloning"`
+	KeepTs bool   `long:"keep-ts" description:"Keep created time file timestamps"`
+}
+
+// Options for configuring health checks with specific intervals, timeouts, and retry settings.
+type HealthCheckOpts struct {
+	Interval      time.Duration `long:"interval" description:"The interval between healthchecks" default:"30s"`
+	Timeout       time.Duration `long:"timeout" description:"The timeout before the command is considered failed" default:"30s"`
+	StartPeriod   time.Duration `long:"start-period" description:"An initialization time period in which failures are not counted towards the maximum number of retries"`
+	Retries       int           `long:"retries" description:"The number of retries before a container is considered unhealthy" default:"3"`
+	StartInterval time.Duration `long:"start-interval" description:"The time interval between health checks during the start period" default:"5s"`
+}
+
+// Options for integrating Docker services and images into builds, including loading and pulling images.
+type WithDockerOpts struct {
+	ComposeFiles    []string `long:"compose" description:"A compose file used to bring up services from"`
+	ComposeServices []string `long:"service" description:"A compose service to bring up"`
+	Loads           []string `long:"load" description:"An image produced by Earthly which is loaded as a Docker image"`
+	Platform        string   `long:"platform" description:"The platform to use"`
+	BuildArgs       []string `long:"build-arg" description:"A build arg override passed on to a referenced Earthly target"`
+	Pulls           []string `long:"pull" description:"An image which is pulled and made available in the docker cache"`
+	AllowPrivileged bool     `long:"allow-privileged" description:"Allow targets referenced by load to assume privileged mode"`
+	PassArgs        bool     `long:"pass-args" description:"Pass arguments to external targets"`
+	CacheID         string   `long:"cache-id" description:"When specified, layer data will be persisted to specified cache"`
+}
+
+// Options for executing commands with privilege and argument passing settings.
+type DoOpts struct {
+	AllowPrivileged bool `long:"allow-privileged" description:"Allow targets to assume privileged mode"`
+	PassArgs        bool `long:"pass-args" description:"Pass arguments to external targets"`
+}
+
+// Options for importing external targets with privilege and argument passing settings.
+type ImportOpts struct {
+	AllowPrivileged bool `long:"allow-privileged" description:"Allow targets to assume privileged mode"`
+	PassArgs        bool `long:"pass-args" description:"Pass arguments to external targets"`
+}
+
+// Options for defining and requiring global arguments within build scripts.
+type ArgOpts struct {
+	Required bool `long:"required" description:"Require argument to be non-empty"`
+	Global   bool `long:"global" description:"Global argument to make available to all other targets"`
+}
+
+// Placeholder for project-wide options.
+type ProjectOpts struct{}
+
+// Placeholder for setting options.
+type SetOpts struct{}
+
+// Placeholder for let options.
+type LetOpts struct{}
+
+// Options for configuring cache behavior, including sharing mode and persistence.
+type CacheOpts struct {
+	Sharing string `long:"sharing" description:"The cache sharing mode: locked (default), shared, private"`
+	Mode    string `long:"chmod" description:"Apply a mode to the cache folder" default:"0644"`
+	ID      string `long:"id" description:"Cache ID, to reuse the same cache across different targets and Earthfiles"`
+	Persist bool   `long:"persist" description:"If should persist cache state in image"`
+}
+
+// NewForOpts creates and returns a ForOpts with default separators.
+func NewForForOpts() ForOpts { ... }
 
 ---

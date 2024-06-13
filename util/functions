@@ -16,10 +16,6 @@ run() { # Feedback
    poetry run python -m files_to_prompt "$@"
 }
 
-draft-feedback-delete(){
-    find ./writing -type f -regex ".*/output/.*[0-9]\{4\}.*\.md" -exec rm {} \;
-}
-
 check_code() {
     poetry run ruff . --fix
     poetry run mypy --disallow-untyped-defs --exclude '/data/' .
@@ -39,4 +35,8 @@ test_marked_code() {
 test_llm_code() {
     echo "Running LLM marked tests"
     poetry run pytest -m llm -s
+}
+
+run_ast() {
+    run /Users/adam/sandbox/earthly/ast/ --ignore "*pycache*" --ignore "*.json" --ignore "*.txt" --ignore "go.sum" --ignore "go.mod" --ignore "Earthfile" --ignore "*.earth"  > prompt.txt
 }

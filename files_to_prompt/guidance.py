@@ -48,12 +48,12 @@ class Model:
         if temperature == 0:
             cache_key = self._hash_prompt(prompt)
             if cache_key in self.cache:
-                print("Cached")
+                # print("Cached")
                 cached_response = self.cache[cache_key]
                 self.messages.append({"role": "assistant", "content": cached_response})
                 self.response[context] = cached_response
                 return
-        print("Request...")
+        # print("Request...")
         response = self.client.chat.completions.create(
             model=self.model,
             messages=self.messages,  # type: ignore
