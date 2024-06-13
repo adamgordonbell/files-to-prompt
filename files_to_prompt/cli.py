@@ -1,6 +1,8 @@
 import os
 import click
+import re
 from fnmatch import fnmatch
+from .guidance import Model, assistant, system, user
 
 def should_ignore(path, gitignore_rules):
     for rule in gitignore_rules:
@@ -28,9 +30,10 @@ def process_path(
         try:
             with open(path, "r") as f:
                 file_contents = f.read()
+                summary = summarize_file(file_contents) 
             click.echo(path)
             click.echo("---")
-            click.echo(file_contents)
+            click.echo(summary)
             click.echo()
             click.echo("---")
         except UnicodeDecodeError:
@@ -67,10 +70,11 @@ def process_path(
                 try:
                     with open(file_path, "r") as f:
                         file_contents = f.read()
+                        summary = summarize_file(file_contents) 
 
                     click.echo(file_path)
                     click.echo("---")
-                    click.echo(file_contents)
+                    click.echo(summary)
                     click.echo()
                     click.echo("---")
                 except UnicodeDecodeError:
@@ -123,3 +127,113 @@ def cli(paths, include_hidden, ignore_gitignore, ignore_patterns):
         process_path(
             path, include_hidden, ignore_gitignore, gitignore_rules, ignore_patterns
         )
+
+def trim_indent(text: str) -> str:
+    # Remove leading spaces from each line
+    output = re.sub(r'^[ ]+', '', text, flags=re.M)
+
+    # Check and remove the first character if it is a newline
+    if output.startswith('\n'):
+        output = output[1:]
+
+    # Check and remove the last character if it is a newline
+    if output.endswith('\n'):
+        output = output[:-1]
+
+    return output
+
+def estimate_num_words(sentence):
+    words = sentence.split()
+    return len(words)
+
+def summarize_file(contents : str) -> str:
+    if estimate_num_words(contents) > 30: 
+        llm = Model("gpt-4-turbo")
+        with system():
+            llm += trim_indent(f"""
+            Objective:
+            Create a summarized version of the given code file that includes only the types, interfaces, and function definitions that are exported (visible outside the file/module). Include explanatory comments for each exported function and type.
+
+            **Instructions:**
+
+            Exclude:
+            - All import statements.
+            - All function bodies.
+            - Any type, interface, or function that is not exported (i.e., starts with a lowercase letter in Go or is prefixed with an underscore in Python).
+
+
+            Include:
+            - Full definitions of any exported types and data structures.
+            - Exported function definitions without bodies.
+            - Concise explanatory comments for each exported function and type.
+
+            **Comments:**
+            - Write a comment at the top summarizing the file's purpose.
+            - Explain each function's purpose, and briefly inputs and outputs.
+            """)
+        with user():
+            llm += trim_indent("""
+                package ast
+
+                import (
+	                "bufio"
+                    "io"
+                )
+
+                type prefs struct {
+                    reader NamedReader
+                }
+
+                type NamedReader interface {
+                    Read(buff []byte) (n int, err error)
+                }
+
+                type Opt func(prefs) (prefs, error)
+
+                func WithSourceMap() Opt {
+                    return func(p prefs) (prefs, error) {
+                        return p, nil
+                    }
+                }
+
+                func FromPath(path string) (prefs, error) {
+                    var p prefs
+                    f, err := os.Open(path)
+                    if err != nil {
+                        return p, err
+                    }
+                    p.reader = f
+                    return p, nil
+                }
+                               """)
+        with assistant():
+            llm += trim_indent("""
+                package ast
+
+                // Parses configurations for a version parser. Defines options (`Opt` and `FromOpt`) to customize parsing behavior, such as enabling a source map or specifying the data source. Contains `prefs` structure for configurations and `NamedReader` interface for reading sources.
+
+                // holds parsing configuration settings.
+                type prefs struct {
+                    reader NamedReader  // data source
+                }
+
+                // an io.Reader with additional methods.
+                type NamedReader interface {
+                    Read(buff []byte) (n int, err error)
+                }
+
+                // for modifying parsing preferences.
+                type Opt func(prefs) (prefs, error)
+
+                // source mapping in preferences.
+                func WithSourceMap() Opt { ... }
+
+                // tell parser to read from a file path.
+                func FromPath(path string) (prefs, error) { ... }
+                               """)
+        with user():
+            llm += contents
+        with assistant():
+            llm.gen('answer', 4096)
+        return llm["answer"]
+    return contents

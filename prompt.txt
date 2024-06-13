@@ -1,584 +1,240 @@
-./pyproject.toml
+Request...
+/Users/adam/sandbox/earthly/ast/listener.go
 ---
-[tool.poetry]
-name = "files-to-prompt"
-version = "0.2.1"
-description = "Concatenate a directory full of files into a single prompt for use with LLMs"
-authors = ["Simon Willison <you@example.com>"]
+package ast
 
-[tool.poetry.dependencies]
-python = ">=3.8"
-click = "^8.0.0"
-diskcache = "*"
-openai = "^1.7.1"
-platformdirs = "*"
-
-[tool.poetry.dev-dependencies]
-pytest = "^6.0.0"
-diskcache = "*"
-[tool.poetry.scripts]
-files-to-prompt = "files_to_prompt.cli:cli"
-
-[tool.pytest.ini_options]
-markers = [
-    "this: description of the this marker",
-    "llm: tests that call llm",
-]
-
-
----
-./prompt.txt
----
-./pyproject.toml
----
-[tool.poetry]
-name = "files-to-prompt"
-version = "0.2.1"
-description = "Concatenate a directory full of files into a single prompt for use with LLMs"
-authors = ["Simon Willison <you@example.com>"]
-
-[tool.poetry.dependencies]
-python = ">=3.8"
-click = "^8.0.0"
-diskcache = "*"
-openai = "^1.7.1"
-platformdirs = "*"
-
-[tool.poetry.dev-dependencies]
-pytest = "^6.0.0"
-diskcache = "*"
-[tool.poetry.scripts]
-files-to-prompt = "files_to_prompt.cli:cli"
-
-[tool.pytest.ini_options]
-markers = [
-    "this: description of the this marker",
-    "llm: tests that call llm",
-]
-
-
----
-
-
----
-./files_to_prompt/__init__.py
----
-
-
----
-./files_to_prompt/cli.py
----
-import os
-import click
-from fnmatch import fnmatch
-
-def should_ignore(path, gitignore_rules):
-    for rule in gitignore_rules:
-        if fnmatch(os.path.basename(path), rule):
-            return True
-        if os.path.isdir(path) and fnmatch(os.path.basename(path) + "/", rule):
-            return True
-    return False
-
-
-def read_gitignore(path):
-    gitignore_path = os.path.join(path, ".gitignore")
-    if os.path.isfile(gitignore_path):
-        with open(gitignore_path, "r") as f:
-            return [
-                line.strip() for line in f if line.strip() and not line.startswith("#")
-            ]
-    return []
-
-
-def process_path(
-    path, include_hidden, ignore_gitignore, gitignore_rules, ignore_patterns
-):
-    if os.path.isfile(path):
-        try:
-            with open(path, "r") as f:
-                file_contents = f.read()
-            click.echo(path)
-            click.echo("---")
-            click.echo(file_contents)
-            click.echo()
-            click.echo("---")
-        except UnicodeDecodeError:
-            warning_message = f"Warning: Skipping file {path} due to UnicodeDecodeError"
-            click.echo(click.style(warning_message, fg="red"), err=True)
-    elif os.path.isdir(path):
-        for root, dirs, files in os.walk(path):
-            if not include_hidden:
-                dirs[:] = [d for d in dirs if not d.startswith(".")]
-                files = [f for f in files if not f.startswith(".")]
-
-            if not ignore_gitignore:
-                gitignore_rules.extend(read_gitignore(root))
-                dirs[:] = [
-                    d
-                    for d in dirs
-                    if not should_ignore(os.path.join(root, d), gitignore_rules)
-                ]
-                files = [
-                    f
-                    for f in files
-                    if not should_ignore(os.path.join(root, f), gitignore_rules)
-                ]
-
-            if ignore_patterns:
-                files = [
-                    f
-                    for f in files
-                    if not any(fnmatch(f, pattern) for pattern in ignore_patterns)
-                ]
-
-            for file in files:
-                file_path = os.path.join(root, file)
-                try:
-                    with open(file_path, "r") as f:
-                        file_contents = f.read()
-
-                    click.echo(file_path)
-                    click.echo("---")
-                    click.echo(file_contents)
-                    click.echo()
-                    click.echo("---")
-                except UnicodeDecodeError:
-                    warning_message = (
-                        f"Warning: Skipping file {file_path} due to UnicodeDecodeError"
-                    )
-                    click.echo(click.style(warning_message, fg="red"), err=True)
-
-
-@click.command()
-@click.argument("paths", nargs=-1, type=click.Path(exists=True))
-@click.option(
-    "--include-hidden",
-    is_flag=True,
-    help="Include files and folders starting with .",
+import (
+	"github.com/antlr/antlr4/runtime/Go/antlr/v4"
+	"github.com/earthly/earthly/ast/parser"
+	"github.com/earthly/earthly/ast/spec"
 )
-@click.option(
-    "--ignore-gitignore",
-    is_flag=True,
-    help="Ignore .gitignore files and include all files",
-)
-@click.option(
-    "ignore_patterns",
-    "--ignore",
-    multiple=True,
-    default=[],
-    help="List of patterns to ignore",
-)
-@click.version_option()
-def cli(paths, include_hidden, ignore_gitignore, ignore_patterns):
-    """
-    Takes one or more paths to files or directories and outputs every file,
-    recursively, each one preceded with its filename like this:
 
-    path/to/file.py
-    ----
-    Contents of file.py goes here
+// This file defines the structure and methods for parsing Earthly AST using ANTLR.
+// It includes the listener implementation that constructs the AST from parsed tokens.
 
-    ---
-    path/to/file2.py
-    ---
-    ...
-    """
-    gitignore_rules = []
-    for path in paths:
-        if not os.path.exists(path):
-            raise click.BadArgumentUsage(f"Path does not exist: {path}")
-        if not ignore_gitignore:
-            gitignore_rules.extend(read_gitignore(os.path.dirname(path)))
-        process_path(
-            path, include_hidden, ignore_gitignore, gitignore_rules, ignore_patterns
-        )
-
-
----
-./files_to_prompt/guidance.py
----
-import hashlib
-import os
-import threading
-import types
-from typing import Dict, List, Optional
-
-import diskcache as dc
-import openai
-import platformdirs
-
-Message = Dict[str, str]
-
-# Create a thread-local object to store the current_role
-_thread_locals: threading.local = threading.local()
-
-def get_current_role() -> Optional[str]:
-    """Return the current role for the current thread."""
-    return getattr(_thread_locals, "current_role", None)
-
-def set_current_role(role: Optional[str]) -> None:
-    """Set the current role for the current thread."""
-    _thread_locals.current_role = role
-
-class Model:
-    def __init__(self, model: str):
-        self.model = model
-        self.client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        self.messages: List[Message] = []
-        self.response: Dict[str, str] = {}
-        cache_path = os.path.join(platformdirs.user_cache_dir("guidance"), "openai.tokens")
-        self.cache = dc.Cache(cache_path, size_limit=int(1e12), eviction_policy="none")
-
-    def __iadd__(self, message: str) -> 'Model':
-        current_role = get_current_role()
-        if current_role:
-            self.messages.append({"role": current_role, "content": message.strip()})
-        return self
-
-    def __add__(self, message: str) -> 'Model':
-        self.__iadd__(message)
-        return self
-
-    def _hash_prompt(self, prompt: str) -> str:
-        return hashlib.sha256(f"{self.model}{prompt}".encode()).hexdigest()
-
-    def gen(self, context: str, max_tokens: int = 300, temperature: float = 0.0) -> None:
-        prompt = "\n".join([f"{message['role']}: {message['content']}" for message in self.messages])
-        if temperature == 0:
-            cache_key = self._hash_prompt(prompt)
-            if cache_key in self.cache:
-                print("Cached")
-                cached_response = self.cache[cache_key]
-                self.messages.append({"role": "assistant", "content": cached_response})
-                self.response[context] = cached_response
-                return
-        print("Request...")
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=self.messages,  # type: ignore
-            max_tokens=max_tokens,
-            temperature=temperature
-        )
-        assistant_message = response.choices[0].message.content or ""
-        self.messages.append({"role": "assistant", "content": assistant_message})
-        self.response[context] = assistant_message
-        if temperature == 0:
-            self.cache[cache_key] = assistant_message
-
-    def clear(self) -> None:
-        self.messages = []
-        self.response = {}
-
-    def __getitem__(self, key: str) -> str:
-        return self.response[key]
-
-    def __str__(self) -> str:
-        formatted_messages = []
-        for message in self.messages:
-            role_tag = f"<{message['role']}>"
-            end_tag = f"</{message['role']}>"
-            formatted_messages.append(f"{role_tag}\n{message['content']}\n{end_tag}")
-        return "\n".join(formatted_messages)
-
-# Context managers for user and assistant roles
-class user:
-    def __enter__(self) -> None:
-        set_current_role("user")
-
-    def __exit__(self, _exc_type: Optional[BaseException], _exc_val: Optional[BaseException], _exc_tb: Optional[types.TracebackType]) -> None:
-        set_current_role(None)
-
-class assistant:
-    def __enter__(self) -> None:
-        set_current_role("assistant")
-
-    def __exit__(self, _exc_type: Optional[BaseException], _exc_val: Optional[BaseException], _exc_tb: Optional[types.TracebackType]) -> None:
-        set_current_role(None)
-
-class system:
-    def __enter__(self) -> None:
-        set_current_role("system")
-
-    def __exit__(self, _exc_type: Optional[BaseException], _exc_val: Optional[BaseException], _exc_tb: Optional[types.TracebackType]) -> None:
-        set_current_role(None)
-
-
----
-./files_to_prompt/__main__.py
----
-from files_to_prompt import cli
-
-if __name__ == "__main__":
-    cli()
-
-
----
-./util/functions
----
-#! /bin/bash
-# shellcheck disable=SC2207 # Arrays are a pain in bash 3
-
-echo "functions assume they are run from repo root"
-echo "run \"list\" for a list of helpers"
-
-INIT_LOCATION="$0"
-
-list(){
-    ./util/bash_includes/list.awk "$INIT_LOCATION"
+// block holds the parsed block of statements and directives.
+type block struct {
+	block         spec.Block
+	statement     *spec.Statement
+	withStatement *spec.WithStatement
+	ifStatement   *spec.IfStatement
+	elseIf        *spec.ElseIf
+	tryStatement  *spec.TryStatement
+	forStatement  *spec.ForStatement
+	waitStatement *spec.WaitStatement
 }
 
-## External
+// listener is an implementation of EarthParserListener that constructs the AST.
+type listener struct {
+	*parser.BaseEarthParserListener
 
-run() { # Feedback
-   poetry run python ./files_to_prompt/__main__.py "$@"
+	tokStream *antlr.CommonTokenStream
+	ef        *spec.Earthfile
+	target    *spec.Target
+	function  *spec.Function
+	blocks    []*block
+	command   *spec.Command
+
+	stmtWords []string
+	execMode  bool
+
+	ctx             context.Context
+	filePath        string
+	enableSourceMap bool
+
+	err error
 }
 
-draft-feedback-delete(){
-    find ./writing -type f -regex ".*/output/.*[0-9]\{4\}.*\.md" -exec rm {} \;
-}
+// newListener creates a new listener instance for parsing.
+func newListener(ctx context.Context, stream *antlr.CommonTokenStream, filePath string, enableSourceMap bool) *listener { ... }
 
-check_code() {
-    poetry run ruff . --fix
-    poetry run mypy --disallow-untyped-defs --exclude '/data/' .
-    poetry run vulture --exclude '/data/,paragraph_parser.py' ./util/feedback
-}
+// Err returns any parsing errors encountered by the listener.
+func (l *listener) Err() error { ... }
 
-test_code() {
-    echo "Excluding LLM tests"
-    poetry run pytest -m "not llm" -s
-}
+// Earthfile returns the parsed Earthfile.
+func (l *listener) Earthfile() spec.Earthfile { ... }
 
-test_marked_code() {
-    poetry run pytest -m this -s --durations=0
-}
+// EnterEarthFile is called when parsing enters the EarthFile rule.
+func (l *listener) EnterEarthFile(c *parser.EarthFileContext) { ... }
 
+// ExitEarthFile is called when parsing exits the EarthFile rule.
+func (l *listener) ExitEarthFile(c *parser.EarthFileContext) { ... }
 
-test_llm_code() {
-    echo "Running LLM marked tests"
-    poetry run pytest -m llm -s
-}
+// EnterTarget is called when parsing enters the Target rule.
+func (l *listener) EnterTarget(c *parser.TargetContext) { ... }
 
+// EnterTargetHeader is called when parsing enters the TargetHeader rule.
+func (l *listener) EnterTargetHeader(c *parser.TargetHeaderContext) { ... }
 
----
-./util/bash_includes/list.awk
----
-#!/usr/bin/env -S gawk -f
+// ExitTarget is called when parsing exits the Target rule.
+func (l *listener) ExitTarget(c *parser.TargetContext) { ... }
 
-# Print functions, but only following "External"
-BEGIN { 
-    printf "function        \t description\n"
-    printf "----------------\t -----------------------------------------------------------------\n"
-}
-$2 == "External" { external=1 }
-$1 ~/\(\)/{ 
-    if (external==1){
-        f=substr($1, 0, index($1,"(")-1)
-        if (substr(f,1,1) != "_")
-        {
-            if(index($0,"#"))
-                printf "%-20s \t %-60s\n",f, substr($0, index($0,"#")+1)
-            else 
-                print f
-        }
-    }
-}
-END {
-    printf "-----------------------------------------------------------------------------------------\n"
-}
+// EnterUserCommand is called when parsing enters the UserCommand rule.
+func (l *listener) EnterUserCommand(c *parser.UserCommandContext) { ... }
 
+// EnterUserCommandHeader is called when parsing enters the UserCommandHeader rule.
+func (l *listener) EnterUserCommandHeader(c *parser.UserCommandHeaderContext) { ... }
 
----
-./tests/test_files_to_prompt.py
----
-import os
-from click.testing import CliRunner
-from files_to_prompt.cli import cli
+// ExitUserCommand is called when parsing exits the UserCommand rule.
+func (l *listener) ExitUserCommand(c *parser.UserCommandContext) { ... }
 
+// EnterFunction is called when parsing enters the Function rule.
+func (l *listener) EnterFunction(c *parser.FunctionContext) { ... }
 
-def test_basic_functionality(tmpdir):
-    runner = CliRunner()
-    with tmpdir.as_cwd():
-        os.makedirs("test_dir")
-        with open("test_dir/file1.txt", "w") as f:
-            f.write("Contents of file1")
-        with open("test_dir/file2.txt", "w") as f:
-            f.write("Contents of file2")
+// EnterFunctionHeader is called when parsing enters the FunctionHeader rule.
+func (l *listener) EnterFunctionHeader(c *parser.FunctionHeaderContext) { ... }
 
-        result = runner.invoke(cli, ["test_dir"])
-        assert result.exit_code == 0
-        assert "test_dir/file1.txt" in result.output
-        assert "Contents of file1" in result.output
-        assert "test_dir/file2.txt" in result.output
-        assert "Contents of file2" in result.output
+// ExitFunction is called when parsing exits the Function rule.
+func (l *listener) ExitFunction(c *parser.FunctionContext) { ... }
 
+// EnterStmt is called when parsing enters the Stmt rule.
+func (l *listener) EnterStmt(c *parser.StmtContext) { ... }
 
-def test_include_hidden(tmpdir):
-    runner = CliRunner()
-    with tmpdir.as_cwd():
-        os.makedirs("test_dir")
-        with open("test_dir/.hidden.txt", "w") as f:
-            f.write("Contents of hidden file")
+// ExitStmt is called when parsing exits the Stmt rule.
+func (l *listener) ExitStmt(c *parser.StmtContext) { ... }
 
-        result = runner.invoke(cli, ["test_dir"])
-        assert result.exit_code == 0
-        assert "test_dir/.hidden.txt" not in result.output
+// EnterCommandStmt is called when parsing enters the CommandStmt rule.
+func (l *listener) EnterCommandStmt(c *parser.CommandStmtContext) { ... }
 
-        result = runner.invoke(cli, ["test_dir", "--include-hidden"])
-        assert result.exit_code == 0
-        assert "test_dir/.hidden.txt" in result.output
-        assert "Contents of hidden file" in result.output
+// ExitCommandStmt is called when parsing exits the CommandStmt rule.
+func (l *listener) ExitCommandStmt(c *parser.CommandStmtContext) { ... }
 
+// EnterWithStmt is called when parsing enters the WithStmt rule.
+func (l *listener) EnterWithStmt(c *parser.WithStmtContext) { ... }
 
-def test_ignore_gitignore(tmpdir):
-    runner = CliRunner()
-    with tmpdir.as_cwd():
-        os.makedirs("test_dir")
-        with open("test_dir/.gitignore", "w") as f:
-            f.write("ignored.txt")
-        with open("test_dir/ignored.txt", "w") as f:
-            f.write("This file should be ignored")
-        with open("test_dir/included.txt", "w") as f:
-            f.write("This file should be included")
+// ExitWithStmt is called when parsing exits the WithStmt rule.
+func (l *listener) ExitWithStmt(c *parser.WithStmtContext) { ... }
 
-        result = runner.invoke(cli, ["test_dir"])
-        assert result.exit_code == 0
-        assert "test_dir/ignored.txt" not in result.output
-        assert "test_dir/included.txt" in result.output
+// EnterWithBlock is called when parsing enters the WithBlock rule.
+func (l *listener) EnterWithBlock(c *parser.WithBlockContext) { ... }
 
-        result = runner.invoke(cli, ["test_dir", "--ignore-gitignore"])
-        assert result.exit_code == 0
-        assert "test_dir/ignored.txt" in result.output
-        assert "This file should be ignored" in result.output
-        assert "test_dir/included.txt" in result.output
+// ExitWithBlock is called when parsing exits the WithBlock rule.
+func (l *listener) ExitWithBlock(c *parser.WithBlockContext) { ... }
 
+// EnterWithCommand is called when parsing enters the WithCommand rule.
+func (l *listener) EnterWithCommand(c *parser.WithCommandContext) { ... }
 
-def test_multiple_paths(tmpdir):
-    runner = CliRunner()
-    with tmpdir.as_cwd():
-        os.makedirs("test_dir1")
-        with open("test_dir1/file1.txt", "w") as f:
-            f.write("Contents of file1")
-        os.makedirs("test_dir2")
-        with open("test_dir2/file2.txt", "w") as f:
-            f.write("Contents of file2")
-        with open("single_file.txt", "w") as f:
-            f.write("Contents of single file")
+// ExitWithCommand is called when parsing exits the WithCommand rule.
+func (l *listener) ExitWithCommand(c *parser.WithCommandContext) { ... }
 
-        result = runner.invoke(cli, ["test_dir1", "test_dir2", "single_file.txt"])
-        assert result.exit_code == 0
-        assert "test_dir1/file1.txt" in result.output
-        assert "Contents of file1" in result.output
-        assert "test_dir2/file2.txt" in result.output
-        assert "Contents of file2" in result.output
-        assert "single_file.txt" in result.output
-        assert "Contents of single file" in result.output
+// EnterIfStmt is called when parsing enters the IfStmt rule.
+func (l *listener) EnterIfStmt(c *parser.IfStmtContext) { ... }
 
+// ExitIfStmt is called when parsing exits the IfStmt rule.
+func (l *listener) ExitIfStmt(c *parser.IfStmtContext) { ... }
 
-def test_ignore_patterns(tmpdir):
-    runner = CliRunner()
-    with tmpdir.as_cwd():
-        os.makedirs("test_dir")
-        with open("test_dir/file_to_ignore.txt", "w") as f:
-            f.write("This file should be ignored due to ignore patterns")
-        with open("test_dir/file_to_include.txt", "w") as f:
-            f.write("This file should be included")
+// EnterIfExpr is called when parsing enters the IfExpr rule.
+func (l *listener) EnterIfExpr(c *parser.IfExprContext) { ... }
 
-        result = runner.invoke(cli, ["test_dir", "--ignore", "*.txt"])
-        assert result.exit_code == 0
-        assert "test_dir/file_to_ignore.txt" not in result.output
-        assert "This file should be ignored due to ignore patterns" not in result.output
-        assert "test_dir/file_to_include.txt" not in result.output
+// ExitIfExpr is called when parsing exits the IfExpr rule.
+func (l *listener) ExitIfExpr(c *parser.IfExprContext) { ... }
 
-        result = runner.invoke(cli, ["test_dir", "--ignore", "file_to_ignore.*"])
-        assert result.exit_code == 0
-        assert "test_dir/file_to_ignore.txt" not in result.output
-        assert "This file should be ignored due to ignore patterns" not in result.output
-        assert "test_dir/file_to_include.txt" in result.output
-        assert "This file should be included" in result.output
+// EnterIfBlock is called when parsing enters the IfBlock rule.
+func (l *listener) EnterIfBlock(c *parser.IfBlockContext) { ... }
 
+// ExitIfBlock is called when parsing exits the IfBlock rule.
+func (l *listener) ExitIfBlock(c *parser.IfBlockContext) { ... }
 
-def test_mixed_paths_with_options(tmpdir):
-    runner = CliRunner()
-    with tmpdir.as_cwd():
-        os.makedirs("test_dir")
-        with open("test_dir/.gitignore", "w") as f:
-            f.write("ignored_in_gitignore.txt\n.hidden_ignored_in_gitignore.txt")
-        with open("test_dir/ignored_in_gitignore.txt", "w") as f:
-            f.write("This file should be ignored by .gitignore")
-        with open("test_dir/.hidden_ignored_in_gitignore.txt", "w") as f:
-            f.write("This hidden file should be ignored by .gitignore")
-        with open("test_dir/included.txt", "w") as f:
-            f.write("This file should be included")
-        with open("test_dir/.hidden_included.txt", "w") as f:
-            f.write("This hidden file should be included")
-        with open("single_file.txt", "w") as f:
-            f.write("Contents of single file")
+// EnterElseIfClause is called when parsing enters the ElseIfClause rule.
+func (l *listener) EnterElseIfClause(c *parser.ElseIfClauseContext) { ... }
 
-        result = runner.invoke(cli, ["test_dir", "single_file.txt"])
-        assert result.exit_code == 0
-        assert "test_dir/ignored_in_gitignore.txt" not in result.output
-        assert "test_dir/.hidden_ignored_in_gitignore.txt" not in result.output
-        assert "test_dir/included.txt" in result.output
-        assert "test_dir/.hidden_included.txt" not in result.output
-        assert "single_file.txt" in result.output
-        assert "Contents of single file" in result.output
+// ExitElseIfClause is called when parsing exits the ElseIfClause rule.
+func (l *listener) ExitElseIfClause(c *parser.ElseIfClauseContext) { ... }
 
-        result = runner.invoke(cli, ["test_dir", "single_file.txt", "--include-hidden"])
-        assert result.exit_code == 0
-        assert "test_dir/ignored_in_gitignore.txt" not in result.output
-        assert "test_dir/.hidden_ignored_in_gitignore.txt" not in result.output
-        assert "test_dir/included.txt" in result.output
-        assert "test_dir/.hidden_included.txt" in result.output
-        assert "single_file.txt" in result.output
-        assert "Contents of single file" in result.output
+// EnterElseIfExpr is called when parsing enters the ElseIfExpr rule.
+func (l *listener) EnterElseIfExpr(c *parser.ElseIfExprContext) { ... }
 
-        result = runner.invoke(
-            cli, ["test_dir", "single_file.txt", "--ignore-gitignore"]
-        )
-        assert result.exit_code == 0
-        assert "test_dir/ignored_in_gitignore.txt" in result.output
-        assert "test_dir/.hidden_ignored_in_gitignore.txt" not in result.output
-        assert "test_dir/included.txt" in result.output
-        assert "test_dir/.hidden_included.txt" not in result.output
-        assert "single_file.txt" in result.output
-        assert "Contents of single file" in result.output
+// ExitElseIfExpr is called when parsing exits the ElseIfExpr rule.
+func (l *listener) ExitElseIfExpr(c *parser.ElseIfExprContext) { ... }
 
-        result = runner.invoke(
-            cli,
-            ["test_dir", "single_file.txt", "--ignore-gitignore", "--include-hidden"],
-        )
-        assert result.exit_code == 0
-        assert "test_dir/ignored_in_gitignore.txt" in result.output
-        assert "test_dir/.hidden_ignored_in_gitignore.txt" in result.output
-        assert "test_dir/included.txt" in result.output
-        assert "test_dir/.hidden_included.txt" in result.output
-        assert "single_file.txt" in result.output
-        assert "Contents of single file" in result.output
+// EnterElseIfBlock is called when parsing enters the ElseIfBlock rule.
+func (l *listener) EnterElseIfBlock(c *parser.ElseIfBlockContext) { ... }
 
+// ExitElseIfBlock is called when parsing exits the ElseIfBlock rule.
+func (l *listener) ExitElseIfBlock(c *parser.ElseIfBlockContext) { ... }
 
-def test_binary_file_warning(tmpdir):
-    runner = CliRunner(mix_stderr=False)
-    with tmpdir.as_cwd():
-        os.makedirs("test_dir")
-        with open("test_dir/binary_file.bin", "wb") as f:
-            f.write(b"\xff")
-        with open("test_dir/text_file.txt", "w") as f:
-            f.write("This is a text file")
+// EnterElseBlock is called when parsing enters the ElseBlock rule.
+func (l *listener) EnterElseBlock(c *parser.ElseBlockContext) { ... }
 
-        result = runner.invoke(cli, ["test_dir"])
-        assert result.exit_code == 0
+// ExitElseBlock is called when parsing exits the ElseBlock rule.
+func (l *listener) ExitElseBlock(c *parser.ElseBlockContext) { ... }
 
-        stdout = result.stdout
-        stderr = result.stderr
+// EnterTryStmt is called when parsing enters the TryStmt rule.
+func (l *listener) EnterTryStmt(c *parser.TryStmtContext) { ... }
 
-        assert "test_dir/text_file.txt" in stdout
-        assert "This is a text file" in stdout
-        assert "\ntest_dir/binary_file.bin" not in stdout
-        assert (
-            "Warning: Skipping file test_dir/binary_file.bin due to UnicodeDecodeError"
-            in stderr
-        )
+// ExitTryStmt is called when parsing exits the TryStmt rule.
+func (l *listener) ExitTryStmt(c *parser.TryStmtContext) { ... }
 
+// EnterTryBlock is called when parsing enters the TryBlock rule.
+func (l *listener) EnterTryBlock(c *parser.TryBlockContext) { ... }
+
+// ExitTryBlock is called when parsing exits the TryBlock rule.
+func (l *listener) ExitTryBlock(c *parser.TryBlockContext) { ... }
+
+// EnterCatchBlock is called when parsing enters the CatchBlock rule.
+func (l *listener) EnterCatchBlock(c *parser.CatchBlockContext) { ... }
+
+// ExitCatchBlock is called when parsing exits the CatchBlock rule.
+func (l *listener) ExitCatchBlock(c *parser.CatchBlockContext) { ... }
+
+// EnterFinallyBlock is called when parsing enters the FinallyBlock rule.
+func (l *listener) EnterFinallyBlock(c *parser.FinallyBlockContext) { ... }
+
+// ExitFinallyBlock is called when parsing exits the FinallyBlock rule.
+func (l *listener) ExitFinallyBlock(c *parser.FinallyBlockContext) { ... }
+
+// EnterForStmt is called when parsing enters the ForStmt rule.
+func (l *listener) EnterForStmt(c *parser.ForStmtContext) { ... }
+
+// ExitForStmt is called when parsing exits the ForStmt rule.
+func (l *listener) ExitForStmt(c *parser.ForStmtContext) { ... }
+
+// EnterForExpr is called when parsing enters the ForExpr rule.
+func (l *listener) EnterForExpr(c *parser.ForExprContext) { ... }
+
+// ExitForExpr is called when parsing exits the ForExpr rule.
+func (l *listener) ExitForExpr(c *parser.ForExprContext) { ... }
+
+// EnterForBlock is called when parsing enters the ForBlock rule.
+func (l *listener) EnterForBlock(c *parser.ForBlockContext) { ... }
+
+// ExitForBlock is called when parsing exits the ForBlock rule.
+func (l *listener) ExitForBlock(c *parser.ForBlockContext) { ... }
+
+// EnterWaitStmt is called when parsing enters the WaitStmt rule.
+func (l *listener) EnterWaitStmt(c *parser.WaitStmtContext) { ... }
+
+// ExitWaitStmt is called when parsing exits the WaitStmt rule.
+func (l *listener) ExitWaitStmt(c *parser.WaitStmtContext) { ... }
+
+// EnterWaitExpr is called when parsing enters the WaitExpr rule.
+func (l *listener) EnterWaitExpr(c *parser.WaitExprContext) { ... }
+
+// ExitWaitExpr is called when parsing exits the WaitExpr rule.
+func (l *listener) ExitWaitExpr(c *parser.WaitExprContext) { ... }
+
+// EnterWaitBlock is called when parsing enters the WaitBlock rule.
+func (l *listener) EnterWaitBlock(c *parser.WaitBlockContext) { ... }
+
+// ExitWaitBlock is called when parsing exits the WaitBlock rule.
+func (l *listener) ExitWaitBlock(c *parser.WaitBlockContext) { ... }
+
+// EnterEnvArgKey is called when parsing enters the EnvArgKey rule.
+func (l *listener) EnterEnvArgKey(c *parser.EnvArgKeyContext) { ... }
+
+// EnterEnvArgValue is called when parsing enters the EnvArgValue rule.
+func (l *listener) EnterEnvArgValue(c *parser.EnvArgValueContext) { ... }
+
+// EnterLabelKey is called when parsing enters the LabelKey rule.
+func (l *listener) EnterLabelKey(c *parser.LabelKeyContext) { ... }
+
+// EnterLabelValue is called when parsing enters the LabelValue rule.
+func (l *listener) EnterLabelValue(c *parser.LabelValueContext) { ... }
+
+// ExitStmtWordsMaybeJSON is called when parsing exits the StmtWordsMaybeJSON rule.
+func (l *listener) ExitStmtWordsMaybeJSON(c *parser.StmtWordsMaybeJSONContext) { ... }
+
+// EnterStmtWord is called when parsing enters the StmtWord rule.
+func (l *listener) EnterStmtWord(c *parser.StmtWordContext) { ... }
 
 ---
