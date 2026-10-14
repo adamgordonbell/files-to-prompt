@@ -10,6 +10,7 @@ click = "^8.0.0"
 diskcache = "*"
 openai = "^1.7.1"
 platformdirs = "*"
+pathspec = "^0.12.1"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.0.0"

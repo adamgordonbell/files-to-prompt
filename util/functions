@@ -40,3 +40,110 @@ test_llm_code() {
 run_ast() {
     run /Users/adam/sandbox/earthly/ast/ --ignore "*pycache*" --ignore "*.json" --ignore "*.txt" --ignore "go.sum" --ignore "go.mod" --ignore "Earthfile" --ignore "*.earth"  > prompt.txt
 }
+
+code_dump() {
+    poetry run files-to-prompt /Users/adam/sandbox/deep-research/ --ignore "**/__pycache__/**" --ignore "data/**" --ignore "fasthtml.md"  > code_dump.md
+}
+
+run_pulumi_content() {
+    # Process docs
+    TEMP_FILE="pulumi_docs_temp.md"
+    run /Users/adam/sandbox/docs/content/docs --ignore "*.json" --ignore "*.svg" --ignore "*.png" --ignore "*.mp4" --ignore "*.jpg" --ignore "*.gif" --ignore "*.webp" --ignore "*.pdf" --ignore "*.jpeg" --ignore "*.mp3" > "$TEMP_FILE"
+    
+    FINAL_FILE="/Users/adam/sandbox/prompts-context/context/pulumi_docs.content.md"
+    (
+        echo "---"
+        echo "name: Pulumi Docs"
+        echo "description: Full Pulumi Docs"
+        echo "---"
+        cat "$TEMP_FILE"
+    ) > "$FINAL_FILE"
+    rm "$TEMP_FILE"
+    echo "Created $FINAL_FILE"
+
+    # Process blog
+    TEMP_FILE="pulumi_blog_temp.md"
+    run /Users/adam/sandbox/docs/content/blog --ignore "*.json" --ignore "*.svg" --ignore "*.png" --ignore "*.mp4" --ignore "*.jpg" --ignore "*.gif" --ignore "*.webp" --ignore "*.pdf" --ignore "*.jpeg" --ignore "*.mp3" > "$TEMP_FILE"
+    
+    FINAL_FILE="/Users/adam/sandbox/prompts-context/context/pulumi_blog.content.md"
+    (
+        echo "---"
+        echo "name: Pulumi Blog"
+        echo "description: Full Pulumi Blog Content"
+        echo "---"
+        cat "$TEMP_FILE"
+    ) > "$FINAL_FILE"
+    rm "$TEMP_FILE"
+    echo "Created $FINAL_FILE"
+}
+
+entries_to_prompt() {
+    # Process entries from Downloads directory
+    TEMP_FILE="entries_temp.md"
+    run /Users/adam/Downloads/entries/ --ignore "*.json" --ignore "*.svg" --ignore "*.png" --ignore "*.mp4" --ignore "*.jpg" --ignore "*.gif" --ignore "*.webp" --ignore "*.pdf" --ignore "*.jpeg" --ignore "*.mp3" > "$TEMP_FILE"
+    
+    FINAL_FILE="/Users/adam/sandbox/prompts-context/context/entries.content.md"
+    (
+        echo "---"
+        echo "name: Entries Content"
+        echo "description: Processed content from entries directory"
+        echo "---"
+        cat "$TEMP_FILE"
+    ) > "$FINAL_FILE"
+    rm "$TEMP_FILE"
+    echo "Created $FINAL_FILE"
+}
+
+entries_without_analysis() {
+    # Process entries from Downloads directory but skip analysis.md files
+    TEMP_FILE="entries_no_analysis_temp.md"
+    run /Users/adam/Downloads/entries/ --ignore "*.json" --ignore "*.svg" --ignore "*.png" --ignore "*.mp4" --ignore "*.jpg" --ignore "*.gif" --ignore "*.webp" --ignore "*.pdf" --ignore "*.jpeg" --ignore "*.mp3" --ignore "**/analysis.md" > "$TEMP_FILE"
+    
+    FINAL_FILE="/Users/adam/sandbox/prompts-context/context/entries_without_analysis.content.md"
+    (
+        echo "---"
+        echo "name: Entries Without Analysis"
+        echo "description: Processed content from entries directory (excluding analysis files)"
+        echo "---"
+        cat "$TEMP_FILE"
+    ) > "$FINAL_FILE"
+    rm "$TEMP_FILE"
+    echo "Created $FINAL_FILE"
+}
+
+python_code_to_prompt() {
+    # Process Python code from writing-tools/util
+    TEMP_FILE="python_code_temp.md"
+    run /Users/adam/sandbox/writing-tools/util/ \
+      --ignore "*.json" \
+      --ignore "*.svg" \
+      --ignore "*.png" \
+      --ignore "*.mp4" \
+      --ignore "*.jpg" \
+      --ignore "*.gif" \
+      --ignore "*.webp" \
+      --ignore "*.pdf" \
+      --ignore "*.jpeg" \
+      --ignore "*.mp3" \
+      --ignore "**/venv/**" \
+      --ignore "**/__pycache__/**" \
+      --ignore "**/.pytest_cache/**" \
+      --ignore "**/.mypy_cache/**" \
+      --ignore "**/poetry.lock" \
+      --ignore "**/background_fetch/data/**" \
+      --ignore "**/*.toml" \
+      --ignore "**/data/116/background/urls.yaml" \
+      --ignore "**/README.md" \
+      > "$TEMP_FILE"
+    
+    FINAL_FILE="/Users/adam/sandbox/prompts-context/context/writing_tools_util.content.md"
+    (
+        echo "---"
+        echo "name: Writing Tools Util Python Code"
+        echo "description: Python source code from the writing-tools utility directory"
+        echo "---"
+        cat "$TEMP_FILE"
+    ) > "$FINAL_FILE"
+    rm "$TEMP_FILE"
+    echo "Created $FINAL_FILE"
+}

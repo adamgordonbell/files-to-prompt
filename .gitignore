@@ -8,3 +8,12 @@ venv
 *.egg-info
 .DS_Store
 prompt.txt
+
+# Generated prompt dumps
+*.txt
+blog.md
+case-studies.md
+code_dump.md
+cta.md
+deepresearch.md
+pulumi_cta/

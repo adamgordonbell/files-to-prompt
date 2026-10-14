@@ -1,15 +1,19 @@
 import os
 import click
 import re
+import pathspec
 from fnmatch import fnmatch
 from .guidance import Model, assistant, system, user
 
 def should_ignore(path, gitignore_rules):
+    basename = os.path.basename(path)
     for rule in gitignore_rules:
-        if fnmatch(os.path.basename(path), rule):
+        if fnmatch(basename, rule):
             return True
-        if os.path.isdir(path) and fnmatch(os.path.basename(path) + "/", rule):
-            return True
+        if os.path.isdir(path):
+            dirname_with_slash = basename + "/"
+            if fnmatch(dirname_with_slash, rule):
+                return True
     return False
 
 
@@ -41,6 +45,9 @@ def process_path(
             click.echo(click.style(warning_message, fg="red"), err=True)
     elif os.path.isdir(path):
         for root, dirs, files in os.walk(path):
+            # Sort directories alphabetically
+            dirs.sort()
+            
             if not include_hidden:
                 dirs[:] = [d for d in dirs if not d.startswith(".")]
                 files = [f for f in files if not f.startswith(".")]
@@ -59,11 +66,26 @@ def process_path(
                 ]
 
             if ignore_patterns:
-                files = [
-                    f
-                    for f in files
-                    if not any(fnmatch(f, pattern) for pattern in ignore_patterns)
-                ]
+                spec = pathspec.PathSpec.from_lines('gitwildmatch', ignore_patterns)
+                filtered_files = []
+                for f in files:
+                    full_path = os.path.join(root, f)
+                    rel_path = os.path.relpath(full_path, path)
+                    if not spec.match_file(rel_path):
+                        filtered_files.append(f)
+                files = filtered_files
+                
+                # Also filter directories
+                filtered_dirs = []
+                for d in dirs:
+                    dir_path = os.path.join(root, d)
+                    rel_path = os.path.relpath(dir_path, path)
+                    if not spec.match_file(rel_path):
+                        filtered_dirs.append(d)
+                dirs[:] = filtered_dirs
+            
+            # Sort files alphabetically
+            files.sort()
 
             for file in files:
                 file_path = os.path.join(root, file)
@@ -146,8 +168,10 @@ def estimate_num_words(sentence):
     words = sentence.split()
     return len(words)
 
+SUMMARIZE = False
+
 def summarize_file(contents : str) -> str:
-    if estimate_num_words(contents) > 30: 
+    if estimate_num_words(contents) > 30 and SUMMARIZE: 
         llm = Model("gpt-4-turbo")
         with system():
             llm += trim_indent(f"""
